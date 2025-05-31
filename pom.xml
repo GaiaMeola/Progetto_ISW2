@@ -12,5 +12,11 @@
         <maven.compiler.source>23</maven.compiler.source>
         <maven.compiler.target>23</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- SonarCloud -->
+        <sonar.projectKey>GaiaMeola_Progetto_ISW2</sonar.projectKey>
+        <sonar.organization>togetjob</sonar.organization>
+        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     </properties>
+
 </project>
