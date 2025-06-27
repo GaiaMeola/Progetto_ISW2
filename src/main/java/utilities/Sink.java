@@ -1,11 +1,20 @@
 package utilities;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import controller.GitInjection;
+import logging.SeLogger;
+import model.ClassifierResult;
 import model.JavaClass;
+import model.MethodHeaders;
 import model.Release;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.*;
 
 public class Sink {
@@ -70,7 +79,27 @@ public class Sink {
             @data
             """;
 
+
     private Sink() {
+    }
+
+    private static int compareJsonMap(String o1, String o2) {
+        try {
+            int num1;
+            int num2;
+            if (o1.contains("-") && o2.contains("-")) {
+                num1 = Integer.parseInt(o1.substring(o1
+                        .lastIndexOf("-") + 1));
+                num2 = Integer.parseInt(o2.substring(o2
+                        .lastIndexOf("-") + 1));
+            } else {
+                num1 = Integer.parseInt(o1);
+                num2 = Integer.parseInt(o2);
+            }
+            return Integer.compare(num1, num2);
+        } catch (NumberFormatException e) {
+            return o1.compareTo(o2);
+        }
     }
 
     public enum FileExtension {
@@ -85,173 +114,252 @@ public class Sink {
 
     public static void serializeToJson(String projectName, String fileName, Object data,
                                        FileExtension fileExtension) {
+
         if (data instanceof JSONObject jsonObject) {
-            sinkJson(projectName, fileName, jsonObject, fileExtension);
+            Sink.sinkJson(projectName, fileName, jsonObject, fileExtension);
+
+        }
+    }
+    public static void serializeProjectAsCsv(@NotNull GitInjection gitInjection) throws IOException {
+        String dirPath = DATASET_PATH + File.separator + METHOD + File.separator;
+        File directory = new File(dirPath);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IOException("Unable to create directory: " + dirPath);
+        }
+
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(
+                dirPath + gitInjection.getProject().toLowerCase() + ".csv"))) {
+
+            writer.write(MethodHeaders.getCsvHeaders() + "\n");
+
+            gitInjection.getJavaClassPerRelease().keySet().stream().sorted(Comparator.comparing(Release::getId))
+                    .forEach(
+                            release -> gitInjection.getJavaClassPerRelease().get(release).forEach(
+                                    javaClass -> {
+                                        StringBuilder builder = new StringBuilder();
+                                        javaClass.getMethodsMetrics().forEach(
+                                                (s, me) -> builder.append(release.getId()).append(';')
+                                                        .append(javaClass.getName()).append(';')
+                                                        .append(s).append(';')
+                                                        .append(me.getLinesOfCode()).append(';')
+                                                        .append(me.getNumberOfChanges()).append(';')
+                                                        .append(me.getAvgChurn()).append(';')
+                                                        .append(me.getStatementCount()).append(';')
+                                                        .append(me.getCyclomaticComplexity()).append(';')
+                                                        .append(me.getCognitiveComplexity()).append(';')
+                                                        .append(me.getNestingDepth()).append(';')
+                                                        .append(me.getParameterCount()).append(';')
+                                                        .append(me.getNumberOfTests()).append(';')
+                                                        .append(me.getAge()).append(';')
+                                                        .append(me.getFanIn()).append(';')
+                                                        .append(me.getFanOut()).append(';')
+                                                        .append(me.getNumberOfCodeSmells()).append(';')
+                                                        .append(me.isBug()).append('\n')
+                                        );
+                                        try {
+                                            writer.write(builder.toString());
+                                        } catch (IOException ignored) {
+                                            throw new IllegalStateException("Something went wrong while writing CSV file");
+                                        }
+                                    }
+                            ));
+
+
         }
     }
 
-    private static void sinkJson(String projectName, String filename, JSONObject jsonObject, FileExtension fileExtension) {
-        String dirPath = DELIVERY_OUTPUT + File.separator + projectName + File.separator + fileExtension.name().toLowerCase();
-        File dir = new File(dirPath);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-        File file = new File(dir, filename + "." + fileExtension.name().toLowerCase());
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-            writer.write(jsonObject.toString(4)); // pretty print with indentation
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
+    private static final String CLASSES = "classes";
     public static void serializeInjectionToCsv(String projectName, String filename,
                                                List<Release> releases, List<JavaClass> javaClasses,
                                                DataSetType dataSetType) {
-        String datasetPath = DATASET_PATH + projectName + File.separator + FileExtension.CSV.name().toLowerCase() + File.separator
-                + dataSetType.name().toLowerCase();
-        File dir = new File(datasetPath);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-        File file = new File(dir, filename + ".csv");
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-            writer.write(CSV_HEADERS_INPUTS);
-            appendInjectionData(writer, releases, javaClasses, false);
+
+        final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
+                FileExtension.CSV.name().toLowerCase(Locale.getDefault()) + File.separator
+                + dataSetType.toString()
+                .toLowerCase(Locale.getDefault());
+        try {
+            File file = getFile(filename, FileExtension.CSV, datasetPath);
+
+
+            try (FileWriter fileWriter = new FileWriter(file)) {
+
+                fileWriter.append(Sink.CSV_HEADERS_INPUTS);
+                appendInjectionData(fileWriter, releases, javaClasses, false);
+
+            }
         } catch (IOException e) {
-            e.printStackTrace();
+            SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
+
+
     }
 
     public static void serializeInjectionToArff(String projectName, String filename,
                                                 List<Release> releases, List<JavaClass> javaClasses,
                                                 @NotNull DataSetType dataSetType) {
-        String datasetPath = DATASET_PATH + projectName + File.separator + FileExtension.ARFF.name().toLowerCase() + File.separator
-                + dataSetType.name().toLowerCase();
-        File dir = new File(datasetPath);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-        File file = new File(dir, filename + ".arff");
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-            writer.write(ARFF_RELATION + filename + "\n\n");
-            writer.write(ARFF_ATTRIBUTE_AND_DATA);
-            appendInjectionData(writer, releases, javaClasses, true);
+
+        final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
+                FileExtension.ARFF.name().toLowerCase(Locale.getDefault()) + File.separator
+                + dataSetType.toString()
+                .toLowerCase(Locale.getDefault());
+        try {
+            File file = getFile(filename, FileExtension.ARFF, datasetPath);
+
+
+            try (FileWriter fileWriter = new FileWriter(file)) {
+                fileWriter.append(Sink.ARFF_RELATION).append(filename)
+                        .append('.')
+                        .append(FileExtension.ARFF.name().toLowerCase(Locale.getDefault()))
+                        .append("\n\n")
+                        .append(Sink.ARFF_ATTRIBUTE_AND_DATA);
+                appendInjectionData(fileWriter, releases, javaClasses, true);
+            }
         } catch (IOException e) {
-            e.printStackTrace();
+            SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
+
+
     }
 
     public static void serializeResultsToCsv(@NotNull String projectName, List<ClassifierResult> results) {
-        String resultsPath = RESULT_PATH + projectName + File.separator;
-        File dir = new File(resultsPath);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-        File file = new File(dir, projectName.toLowerCase() + "_report.csv");
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-            writer.write(CSV_HEADER_RESULTS);
-            appendResultsData(writer, results);
+
+        final String resultsPath = Sink.RESULT_PATH + projectName + File.separator;
+        final String filename = projectName.toLowerCase(Locale.getDefault()) + "_report";
+        try {
+            File file = getFile(filename, FileExtension.CSV, resultsPath);
+            try (FileWriter fileWriter = new FileWriter(file)) {
+                fileWriter.append(Sink.CSV_HEADER_RESULTS);
+                appendResultsData(projectName, fileWriter, results);
+            }
         } catch (IOException e) {
-            e.printStackTrace();
+            SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
+
+
     }
 
-    private static void appendInjectionData(Writer writer, List<Release> releases,
+    private static void appendInjectionData(FileWriter fileWriter, List<Release> releases,
                                             List<JavaClass> javaClasses, boolean arffFile) throws IOException {
         for (Release release : releases) {
             for (JavaClass javaClass : javaClasses) {
                 if (javaClass.getRelease().getId() == release.getId()) {
-                    doAppendData(writer, release, javaClass, arffFile);
+                    doAppendData(fileWriter, release, javaClass, arffFile);
                 }
             }
         }
     }
 
-    private static void doAppendData(Writer writer, Release release, JavaClass javaClass,
+    private static void doAppendData(FileWriter fileWriter, Release release, JavaClass javaClass,
                                      boolean isArff) throws IOException {
         String releaseID = Integer.toString(release.getId());
-        String isClassBugged = javaClass.isBug() ? "YES" : "NO";
-        String sizeOfClass = String.valueOf(javaClass.getSize());
-        String addedLOC = String.valueOf(javaClass.getAddedLoc());
-        String avgAddedLOC = String.valueOf(javaClass.getAvgAddedLoc());
-        String maxAddedLOC = String.valueOf(javaClass.getMaxAddedLoc());
-        String removedLOC = String.valueOf(javaClass.getRemovedLoc());
-        String avgRemovedLOC = String.valueOf(javaClass.getAvgRemovedLoc());
-        String maxRemovedLOC = String.valueOf(javaClass.getMaxRemovedLoc());
-        String touchedLOC = String.valueOf(javaClass.getTouchedLoc());
-        String avgTouchedLOC = String.valueOf(javaClass.getAvgTouchedLoc());
-        String maxTouchedLOC = String.valueOf(javaClass.getMaxTouchedLoc());
-        String churn = String.valueOf(javaClass.getChurn());
-        String avgChurn = String.valueOf(javaClass.getAvgChurn());
-        String maxChurn = String.valueOf(javaClass.getMaxChurn());
-        String nRevisions = String.valueOf(javaClass.getNumberOfRevisions());
-        String nDefectFixes = String.valueOf(javaClass.getNumberOfDefectFixes());
-        String nAuthors = String.valueOf(javaClass.getNumberOfAuthors());
-
-        if (isArff) {
-            // ARFF format: values separated by commas
-            writer.write(String.join(",",
-                    sizeOfClass,
-                    addedLOC,
-                    avgAddedLOC,
-                    maxAddedLOC,
-                    removedLOC,
-                    avgRemovedLOC,
-                    maxRemovedLOC,
-                    churn,
-                    avgChurn,
-                    maxChurn,
-                    touchedLOC,
-                    avgTouchedLOC,
-                    maxTouchedLOC,
-                    nRevisions,
-                    nDefectFixes,
-                    nAuthors,
-                    isClassBugged) + "\n");
-        } else {
-            // CSV format: include release id and class name as well
-            writer.write(String.join(",",
-                    releaseID,
-                    javaClass.getName(),
-                    sizeOfClass,
-                    addedLOC,
-                    avgAddedLOC,
-                    maxAddedLOC,
-                    removedLOC,
-                    avgRemovedLOC,
-                    maxRemovedLOC,
-                    touchedLOC,
-                    avgTouchedLOC,
-                    maxTouchedLOC,
-                    churn,
-                    avgChurn,
-                    maxChurn,
-                    nRevisions,
-                    nDefectFixes,
-                    nAuthors,
-                    isClassBugged) + "\n");
+        String isClassBugged = javaClass.getMetrics().isBug() ? "YES" : "NO";
+        String sizeOfClass = String.valueOf(javaClass.getMetrics().getSize());
+        String addedLOC = String.valueOf(javaClass.getMetrics().getAddedLOCMetrics().getVal());
+        String avgAddedLOC = String.valueOf(javaClass.getMetrics().getAddedLOCMetrics().getAvgVal());
+        String maxAddedLOC = String.valueOf(javaClass.getMetrics().getAddedLOCMetrics().getMaxVal());
+        String removedLOC = String.valueOf(javaClass.getMetrics().getRemovedLOCMetrics().getVal());
+        String avgRemovedLOC = String.valueOf(javaClass.getMetrics().getRemovedLOCMetrics().getAvgVal());
+        String maxRemovedLOC = String.valueOf(javaClass.getMetrics().getRemovedLOCMetrics().getMaxVal());
+        String touchedLOC = String.valueOf(javaClass.getMetrics().getTouchedLOCMetrics().getVal());
+        String avgTouchedLOC = String.valueOf(javaClass.getMetrics().getTouchedLOCMetrics().getAvgVal());
+        String maxTouchedLOC = String.valueOf(javaClass.getMetrics().getTouchedLOCMetrics().getMaxVal());
+        String churn = String.valueOf(javaClass.getMetrics().getChurnMetrics().getVal());
+        String avgChurn = String.valueOf(javaClass.getMetrics().getChurnMetrics().getAvgVal());
+        String maxChurn = String.valueOf(javaClass.getMetrics().getChurnMetrics().getMaxVal());
+        String nRevisions = String.valueOf(javaClass.getMetrics().getNumberOfRevisions());
+        String nDefectFixes = String.valueOf(javaClass.getMetrics().getNumberOfDefectFixes());
+        String nAuthors = String.valueOf(javaClass.getMetrics().getNumberOfAuthors());
+        String className = javaClass.getName();
+        if (!isArff) {
+            fileWriter.append(releaseID).append(",")
+                    .append(className).append(",");
         }
+        fileWriter.append(sizeOfClass).append(",")
+                .append(addedLOC).append(",")
+                .append(avgAddedLOC).append(",")
+                .append(maxAddedLOC).append(",")
+                .append(removedLOC).append(",")
+                .append(avgRemovedLOC).append(",")
+                .append(maxRemovedLOC).append(",")
+                .append(touchedLOC).append(",")
+                .append(avgTouchedLOC).append(",")
+                .append(maxTouchedLOC).append(",")
+                .append(churn).append(",")
+                .append(avgChurn).append(",")
+                .append(maxChurn).append(",")
+                .append(nRevisions).append(",")
+                .append(nDefectFixes).append(",")
+                .append(nAuthors).append(",")
+                .append(isClassBugged).append("\n");
     }
 
-    private static void appendResultsData(Writer writer, List<ClassifierResult> results) throws IOException {
-        for (ClassifierResult result : results) {
-            writer.write(String.join(",",
-                    result.getDataset(),
-                    String.valueOf(result.getTrainingReleases()),
-                    String.valueOf(result.getTrainingInstancesPercent()),
-                    result.getClassifierName(),
-                    result.getFeatureSelection(),
-                    result.getBalancing(),
-                    result.getCostSensitive(),
-                    String.valueOf(result.getPrecision()),
-                    String.valueOf(result.getRecall()),
-                    String.valueOf(result.getAreaUnderROC()),
-                    String.valueOf(result.getKappa()),
-                    String.valueOf(result.getTruePositives()),
-                    String.valueOf(result.getFalsePositives()),
-                    String.valueOf(result.getTrueNegatives()),
-                    String.valueOf(result.getFalseNegatives())
-            ) + "\n");
+    private static void appendResultsData(String projectName, FileWriter fileWriter,
+                                          List<ClassifierResult> results) throws IOException {
+        for (ClassifierResult classifierResult : results) {
+            fileWriter.append(projectName).append(",")
+                    .append(String.valueOf(classifierResult.getWalkForwardIteration())).append(",")
+                    .append(String.valueOf(classifierResult.getTrainingPercent())).append(",")
+                    .append(classifierResult.getClassifierName()).append(",");
+            if (classifierResult.isFeatureSelection()) {
+                fileWriter.append(classifierResult.getCustomClassifier().getFeatureSelectionFilterName()).append(",");
+            } else {
+                fileWriter.append("None").append(",");
+            }
+            if (classifierResult.hasSampling()) {
+                fileWriter.append(classifierResult.getCustomClassifier().getSamplingFilterName()).append(",");
+            } else {
+                fileWriter.append("None").append(",");
+            }
+            if (classifierResult.isCostSensitive()) {
+                fileWriter.append("SensitiveLearning").append(",");
+            } else {
+                fileWriter.append("None").append(",");
+            }
+            fileWriter.append(String.valueOf(classifierResult.getPrecision())).append(",")
+                    .append(String.valueOf(classifierResult.getRecall())).append(",")
+                    .append(String.valueOf(classifierResult.getAreaUnderROC())).append(",")
+                    .append(String.valueOf(classifierResult.getKappa())).append(",")
+                    .append(String.valueOf(classifierResult.getTruePositives())).append(",")
+                    .append(String.valueOf(classifierResult.getFalsePositives())).append(",")
+                    .append(String.valueOf(classifierResult.getTrueNegatives())).append(",")
+                    .append(String.valueOf(classifierResult.getFalseNegatives())).append("\n");
         }
+
     }
+
+
+    private static void sinkJson(String projectName, String filename, JSONObject data, FileExtension fe) {
+
+        final String projectPath = INJECTION_PATH + projectName;
+        try {
+            File file = getFile(filename, fe, projectPath);
+            try (FileWriter fileWriter = new FileWriter(file)) {
+                Map<String, Object> sorted = new TreeMap<>(Sink::compareJsonMap);
+                sorted.putAll(data.toMap());
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.enable(SerializationFeature.INDENT_OUTPUT);
+                mapper.writeValue(fileWriter, sorted);
+            }
+        } catch (IOException e) {
+            final String severe = "sinkJson: " + e.getMessage();
+            SeLogger.getInstance().getLogger().severe(severe);
+        }
+
+
+    }
+
+    private static @NotNull File getFile(String filename, FileExtension fe, String path) throws IOException {
+        File file = new File(path);
+        if (!file.exists()) {
+            boolean created = file.mkdirs();
+            if (!created) {
+                throw new IOException("Failed to create directories");
+            }
+        }
+        file = new File(path + File.separator + filename + "." +
+                fe.name().toLowerCase(Locale.getDefault()));
+        return file;
+    }
+
 }
