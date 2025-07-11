@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.logging.Logger;
 
+/* // "OPENJPA": "https://github.com/apache/openjpa.git"*/
 
 public class Main {
 
