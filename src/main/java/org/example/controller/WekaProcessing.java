@@ -6,6 +6,9 @@ import org.example.model.CustomClassifier;
 import org.example.utilities.Sink;
 import weka.classifiers.Classifier;
 import weka.classifiers.Evaluation;
+import weka.classifiers.meta.CVParameterSelection;
+import weka.classifiers.trees.RandomForest;
+import weka.classifiers.bayes.NaiveBayes;
 import weka.core.Instances;
 import weka.core.converters.ConverterUtils;
 
@@ -27,7 +30,6 @@ public class WekaProcessing {
         this.classifierResults = new ArrayList<>();
     }
 
-
     public void classify() {
 
         final String arff = Sink.FileExtension.ARFF.name().toLowerCase(Locale.getDefault());
@@ -36,7 +38,6 @@ public class WekaProcessing {
         final String training_path = head + "training" + File.separator + this.projName;
         final String testing_path = head + "testing" + File.separator + this.projName;
 
-        // Create a CountDownLatch with numIter count
         CountDownLatch latch = new CountDownLatch(this.numIter);
 
         for (int walkForwardIteration = 1; walkForwardIteration <= this.numIter; walkForwardIteration++) {
@@ -61,15 +62,19 @@ public class WekaProcessing {
 
                     for (CustomClassifier customClassifier : customClassifiers) {
                         Evaluation evaluator = new Evaluation(testingSetInstance);
-                        Classifier classifier = customClassifier.getClassifier();
-                        classifier.buildClassifier(trainingSetInstance);
-                        evaluator.evaluateModel(classifier, testingSetInstance);
+
+                        Classifier originalClassifier = customClassifier.getClassifier();
+                        Classifier tunedClassifier = tuneIfNeeded(originalClassifier, trainingSetInstance);
+
+                        tunedClassifier.buildClassifier(trainingSetInstance);
+                        evaluator.evaluateModel(tunedClassifier, testingSetInstance);
+
                         ClassifierResult resultOfClassifier = new ClassifierResult(iteration, customClassifier, evaluator);
                         resultOfClassifier.setTrainingPercent(100.0 * (
                                 (double) trainingSetInstance.numInstances() /
                                         (trainingSetInstance.numInstances() + testingSetInstance.numInstances())));
 
-                        synchronized (classifierResults) { // Ensure thread-safe access
+                        synchronized (classifierResults) {
                             classifierResults.add(resultOfClassifier);
                         }
                     }
@@ -77,15 +82,13 @@ public class WekaProcessing {
                     final String severe = "Error in classify() during walkForwardIteration: " + iteration;
                     SeLogger.getInstance().getLogger().severe(severe + ": " + e.getMessage());
                 } finally {
-                    latch.countDown(); // Decrement latch count when done
+                    latch.countDown();
                 }
             };
 
-            // Start each task in a new thread
             new Thread(task).start();
         }
 
-        // Wait for all threads to complete
         try {
             latch.await();
         } catch (InterruptedException e) {
@@ -96,5 +99,21 @@ public class WekaProcessing {
 
     public void sinkResults() {
         Sink.serializeResultsToCsv(this.projName, this.classifierResults);
+    }
+
+    // Metodo privato per tuning automatico
+    private Classifier tuneIfNeeded(Classifier classifier, Instances trainingSet) throws Exception {
+        if (classifier instanceof RandomForest) {
+            CVParameterSelection ps = new CVParameterSelection();
+            ps.setClassifier(classifier);
+            ps.addCVParameter("I 10 100 10"); // Tuning sul numero di alberi: da 10 a 100 con step 10
+            ps.setNumFolds(3); // Usa 3-fold cross-validation
+            ps.buildClassifier(trainingSet);
+            return ps;
+        } else if (classifier instanceof NaiveBayes) {
+            return classifier; // Nessun tuning necessario
+        } else {
+            return classifier; // Altri classificatori lasciati invariati
+        }
     }
 }

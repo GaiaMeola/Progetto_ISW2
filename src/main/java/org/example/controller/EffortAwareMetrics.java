@@ -36,4 +36,41 @@ public class EffortAwareMetrics {
 
         return totalBugs == 0 ? 0 : (double) foundBugs / totalBugs * 100.0;
     }
+
+    /**
+     * Calcola NPofB@x (POFB normalizzato) dato un elenco di moduli.
+     * Normalizza il rischio dividendo per LOC prima di ordinare.
+     * @param modules lista di moduli con info su LOC, rischio e presenza bug
+     * @param xPercent valore tra 0 e 100 (es: 20 per NPofB@20)
+     * @return percentuale di bug trovati ispezionando top x% LOC normalizzata
+     */
+    public static double calculateNPofB(List<Module> modules, double xPercent) {
+        // Ordina i moduli per rischio normalizzato (rischio diviso LOC) decrescente
+        modules.sort((a, b) -> {
+            double riskA = a.getRisk() / (double) a.getLoc();
+            double riskB = b.getRisk() / (double) b.getLoc();
+            return Double.compare(riskB, riskA);
+        });
+
+        // Calcola il totale di LOC da ispezionare
+        int totalLOC = modules.stream().mapToInt(Module::getLoc).sum();
+        int budgetLOC = (int) Math.ceil((xPercent / 100.0) * totalLOC);
+
+        // Calcola il numero totale di bug
+        long totalBugs = modules.stream().filter(Module::isBuggy).count();
+
+        int inspectedLOC = 0;
+        long foundBugs = 0;
+
+        for (Module m : modules) {
+            if (inspectedLOC + m.getLoc() > budgetLOC) break;
+
+            inspectedLOC += m.getLoc();
+            if (m.isBuggy()) {
+                foundBugs++;
+            }
+        }
+
+        return totalBugs == 0 ? 0 : (double) foundBugs / totalBugs * 100.0;
+    }
 }
