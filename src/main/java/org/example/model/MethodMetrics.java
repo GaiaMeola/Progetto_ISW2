@@ -2,6 +2,8 @@ package org.example.model;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.util.HashSet;
+import java.util.Set;
 
 public class MethodMetrics {
 
@@ -18,14 +20,18 @@ public class MethodMetrics {
      * end line in the class
      */
     private int endLine;
+
     private String simpleName;
 
     /**
      * Total churn: sum of all lines of code added and deleted in the method over time.
      */
-    private int addedChurn = 0;
 
+    private int addedChurn = 0;
     private int removedChurn = 0;
+    private int maxAddedChurn = 0;
+    private int maxRemovedChurn = 0;
+
 
     /**
      * Number of physical (or non-commented) lines of code in the method.
@@ -61,18 +67,26 @@ public class MethodMetrics {
     /**
      * The Amount of code smells detected in the method using static analysis tools.
      */
-    private int numberOfCodeSmells;
 
-    private int numberOfTests = 0;
+    private double halsteadEffort;
+    private double commentDensity;  // tra 0 e 1
+    private int numberOfCodeSmells;
     private int age = 1;
     private int fanIn = 0;
     private int fanOut = 0;
     private String methodAccessor;
     private int numberOfChanges = 0;
+    private final Set<String> authors = new HashSet<>();
 
     public void addChurn(int addedChurn, int removedChurn) {
         this.addedChurn += addedChurn;
         this.removedChurn += removedChurn;
+        if (maxAddedChurn == 0 || addedChurn > maxAddedChurn) {
+            maxAddedChurn = addedChurn;
+        }
+        if (maxRemovedChurn == 0 || removedChurn > maxRemovedChurn) {
+            maxRemovedChurn = removedChurn;
+        }
     }
 
     public void incChanges() {
@@ -86,14 +100,14 @@ public class MethodMetrics {
                 ", numberOfFix=" + numberOfChanges +
                 ", churn=" + addedChurn +
                 ", linesOfCode=" + linesOfCode +
-                ", statementCount=" + statementCount +
                 ", cyclomaticComplexity=" + cyclomaticComplexity +
                 ", cognitiveComplexity=" + cognitiveComplexity +
                 ", nestingDepth=" + nestingDepth +
                 ", parameterCount=" + parameterCount +
                 ", numberOfCodeSmells=" + numberOfCodeSmells +
-                ", numberOfReference=" + numberOfTests +
                 ", methodAccessor=" + methodAccessor +
+                ", startLine=" + beginLine +
+                ", endLine=" + endLine +
                 '}';
     }
 
@@ -110,15 +124,17 @@ public class MethodMetrics {
         this.linesOfCode = linesOfCode > 0 ?  linesOfCode : 1 ;
     }
 
-    public void incNumberOfTests(){
-        this.numberOfTests += 1;
-    }
     public void incCodeSmells() {
         this.numberOfCodeSmells++;
     }
 
-    public int getAvgChurn() {
-        return this.numberOfChanges > 0 ? this.addedChurn + this.removedChurn / this.numberOfChanges : 0;
+
+    public void addAuthor(String name) {
+        this.authors.add(name);
+    }
+
+    public int getAuthorCount() {
+        return !this.authors.isEmpty() ? this.authors.size() : 1;
     }
 
     public boolean isBug() {
@@ -169,6 +185,22 @@ public class MethodMetrics {
         this.removedChurn = removedChurn;
     }
 
+    public int getMaxAddedChurn() {
+        return maxAddedChurn;
+    }
+
+    public void setMaxAddedChurn(int maxAddedChurn) {
+        this.maxAddedChurn = maxAddedChurn;
+    }
+
+    public int getMaxRemovedChurn() {
+        return maxRemovedChurn;
+    }
+
+    public void setMaxRemovedChurn(int maxRemovedChurn) {
+        this.maxRemovedChurn = maxRemovedChurn;
+    }
+
     public int getLinesOfCode() {
         return linesOfCode;
     }
@@ -213,20 +245,28 @@ public class MethodMetrics {
         this.parameterCount = parameterCount;
     }
 
+    public double getHalsteadEffort() {
+        return halsteadEffort;
+    }
+
+    public void setHalsteadEffort(double halsteadEffort) {
+        this.halsteadEffort = halsteadEffort;
+    }
+
+    public double getCommentDensity() {
+        return commentDensity;
+    }
+
+    public void setCommentDensity(double commentDensity) {
+        this.commentDensity = commentDensity;
+    }
+
     public int getNumberOfCodeSmells() {
         return numberOfCodeSmells;
     }
 
     public void setNumberOfCodeSmells(int numberOfCodeSmells) {
         this.numberOfCodeSmells = numberOfCodeSmells;
-    }
-
-    public int getNumberOfTests() {
-        return numberOfTests;
-    }
-
-    public void setNumberOfTests(int numberOfTests) {
-        this.numberOfTests = numberOfTests;
     }
 
     public int getAge() {
@@ -263,5 +303,26 @@ public class MethodMetrics {
 
     public void setNumberOfChanges(int numberOfChanges) {
         this.numberOfChanges = numberOfChanges;
+    }
+
+    public Set<String> getAuthors() {
+        return authors;
+    }
+
+    public void incNumberOfTests() {
+    }
+
+    public char[] getAvgChurn() {
+        return new char[0];
+    }
+
+    public double getNumberOfTests() {
+        return 0;
+    }
+
+    public void setNumberOfTests(char[] numberOfTests) {
+    }
+
+    public void setNumberOfTests(double numberOfTests) {
     }
 }

@@ -1,4 +1,4 @@
 {
-  "BOOKKEEPER": "https://github.com/apache/bookkeeper.git",
-  "OPENJPA": "https://github.com/apache/openjpa.git"
+  "BOOKKEEPER": "https://github.com/GaiaMeola/bookkeeper.git",
+  "OPENJPA": "https://github.com/GaiaMeola/openjpa.git"
 }

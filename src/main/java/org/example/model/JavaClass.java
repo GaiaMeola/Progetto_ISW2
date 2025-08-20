@@ -153,4 +153,8 @@ public class JavaClass {
     public List<Integer> getLOCRemovedByClass() {
         return lOCRemovedByClass;
     }
+
+    public boolean isHasMap() {
+        return false;
+    }
 }

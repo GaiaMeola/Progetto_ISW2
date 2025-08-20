@@ -2,12 +2,15 @@ package org.example.controller;
 
 import org.example.logging.SeLogger;
 import org.example.model.Release;
+import org.example.model.Ticket;
 import org.example.utilities.Sink;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Logger;
 
@@ -33,6 +36,16 @@ public class Pipeline implements Runnable{
         String info = getPipeMsg("starting processing project");
         logger.info(info);
 
+        // Controllo iniziale dei parametri
+        if (targetName == null || targetName.isBlank()) {
+            logger.severe("targetName è null o vuoto!");
+            return;
+        }
+        if (targetUrl == null || targetUrl.isBlank()) {
+            logger.severe("targetUrl è null o vuoto!");
+            return;
+        }
+
         long overallStart = System.nanoTime();
 
         final String seconds = " seconds";
@@ -46,13 +59,17 @@ public class Pipeline implements Runnable{
             logger.info(info);
 
             JiraInjection jiraInjection = new JiraInjection(this.targetName);
+            logger.info("Start injectReleases");
             jiraInjection.injectReleases();
+            logger.info("End injectReleases");
             end = System.nanoTime();
             info = getPipeMsg("start releases injection took: " + getTimeInSeconds(start, end) + seconds);
             logger.info(info);
 
             start = System.nanoTime();
+            logger.info("Start getReleases");
             List<Release> releases = jiraInjection.getReleases();
+            logger.info("End getReleases");
             end = System.nanoTime();
             info = getPipeMsg("releases injection complete took: " + getTimeInSeconds(start, end) +
                     seconds);
@@ -64,16 +81,20 @@ public class Pipeline implements Runnable{
             logger.info(info);
 
             GitInjection gitInjection = new GitInjection(this.targetName, this.targetUrl, releases);
+            logger.info("Start injectCommits");
             gitInjection.injectCommits();
+            logger.info("End injectCommits");
             end = System.nanoTime();
             info = getPipeMsg("commits injection complete took: " + getTimeInSeconds(start, end) +
                     seconds);
             logger.info(info);
 
             start = System.nanoTime();
+            logger.info("Start injectTickets");
             jiraInjection.injectTickets();
             gitInjection.setTickets(jiraInjection.getFixedTickets());
             gitInjection.preprocessCommitsWithIssue();
+            logger.info("End injectTickets");
             end = System.nanoTime();
             info = getPipeMsg("ticket injection and commit preprocessing took: " +
                     getTimeInSeconds(start, end) + seconds);
@@ -84,12 +105,19 @@ public class Pipeline implements Runnable{
             info = getPipeMsg("start java class injection");
             logger.info(info);
 
+            logger.info("Start preprocessJavaClasses");
             gitInjection.preprocessJavaClasses();
+            logger.info("End preprocessJavaClasses");
+
             end = System.nanoTime();
             info = getPipeMsg("java class injection complete took: " + getTimeInSeconds(start, end)
                     + seconds);
             logger.info(info);
             gitInjection.closeRepo();
+
+            // **Export tickets and commits**
+            exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON);
+            exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.CSV);
 
             // Preprocessing Project
             start = System.nanoTime();
@@ -116,6 +144,7 @@ public class Pipeline implements Runnable{
                     seconds);
             logger.info(info);
 
+            /*
             // Classification Phase
             start = System.nanoTime();
             info = getPipeMsg("start processing phase");
@@ -131,6 +160,7 @@ public class Pipeline implements Runnable{
             info = getPipeMsg("classification complete took: " + getTimeInSeconds(start, end) +
                     seconds);
             logger.info(info);
+
             // Sinking Results
             start = System.nanoTime();
             wekaProcessing.sinkResults();
@@ -138,6 +168,7 @@ public class Pipeline implements Runnable{
             info = getPipeMsg("sink results complete took: " + getTimeInSeconds(start, end) +
                     seconds);
             logger.info(info);
+             */
 
         } catch (Exception e) {
             logger.severe("error: " + e.getMessage());
@@ -175,6 +206,14 @@ public class Pipeline implements Runnable{
                 Sink.FileExtension.JSON);
     }
 
+    public void exportTicketsAndCommits(String projectName, List<Ticket> tickets, Sink.FileExtension fe) {
+        String filename = projectName.toLowerCase(Locale.getDefault()) + "_tickets_commits";
+        try {
+            Sink.serializeTicketsAndCommits(projectName, filename, tickets, fe);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Override
     public void run() {

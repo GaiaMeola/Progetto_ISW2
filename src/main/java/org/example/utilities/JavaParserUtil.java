@@ -7,6 +7,7 @@ import com.github.javaparser.ast.stmt.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class JavaParserUtil {
@@ -57,17 +58,20 @@ public class JavaParserUtil {
     public static int computeEffectiveLOC(@NotNull MethodDeclaration method) {
         return method.getBody()
                 .map(body -> {
-                    String code = body.toString()
-                            .replaceAll(MULTILINE_COMMENTS, "") // rimuove /* ... */
-                            .replaceAll(SINGLE_LINE_COMMENTS, "");           // rimuove // ...
-                    return Math.toIntExact(Arrays.stream(code.split("\n"))
-                            .map(String::trim)
+                    // protezione contro body null o body.toString() null
+                    String code = Optional.ofNullable(body.toString()).orElse("");
+
+                    code = code.replaceAll(MULTILINE_COMMENTS, "")
+                            .replaceAll(SINGLE_LINE_COMMENTS, "");
+
+                    return (int) Arrays.stream(code.split("\n"))
+                            .map(line -> Optional.ofNullable(line).orElse("").trim()) // sicuro anche se line null
                             .filter(line -> !line.isEmpty() && !line.equals("{") && !line.equals("}"))
-                            .count()
-                    );
+                            .count();
                 })
                 .orElse(0);
     }
+
 
     public static int computeParameterCount(@NotNull MethodDeclaration method) {
         return method.getParameters().size();

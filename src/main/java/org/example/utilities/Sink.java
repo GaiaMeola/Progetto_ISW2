@@ -4,28 +4,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.example.controller.GitInjection;
 import org.example.logging.SeLogger;
-import org.example.model.ClassifierResult;
-import org.example.model.JavaClass;
-import org.example.model.MethodHeaders;
-import org.example.model.Release;
+import org.example.model.*;
 import org.jetbrains.annotations.NotNull;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class Sink {
 
     public static final String DELIVERY_OUTPUT = "deliveryOutput";
-    private static final String INJECTION_PATH = DELIVERY_OUTPUT + File.separator
-            + "injection" + File.separator;
-    private static final String DATASET_PATH = DELIVERY_OUTPUT + File.separator
-            + "datasets" + File.separator;
-    private static final String RESULT_PATH = DELIVERY_OUTPUT + File.separator
-            + "results" + File.separator;
+    private static final String INJECTION_PATH = DELIVERY_OUTPUT + File.separator + "injection" + File.separator;
+    private static final String DATASET_PATH = DELIVERY_OUTPUT + File.separator + "datasets" + File.separator;
+    private static final String RESULT_PATH = DELIVERY_OUTPUT + File.separator + "results" + File.separator;
     private static final String METHOD = "method";
 
     private static final String CSV_HEADERS_INPUTS = "RELEASE_ID," +
@@ -54,7 +51,9 @@ public class Sink {
             "TRUE_POSITIVES," +
             "FALSE_POSITIVES," +
             "TRUE_NEGATIVES," +
-            "FALSE_NEGATIVES\n";
+            "FALSE_NEGATIVES," +
+            "POFB20," +
+            "NPOFB20\n";
 
     private static final String ARFF_RELATION = "@relation ";
     private static final String ARFF_ATTRIBUTE_AND_DATA = """
@@ -79,19 +78,15 @@ public class Sink {
             @data
             """;
 
-
     private Sink() {
     }
 
     private static int compareJsonMap(String o1, String o2) {
         try {
-            int num1;
-            int num2;
+            int num1, num2;
             if (o1.contains("-") && o2.contains("-")) {
-                num1 = Integer.parseInt(o1.substring(o1
-                        .lastIndexOf("-") + 1));
-                num2 = Integer.parseInt(o2.substring(o2
-                        .lastIndexOf("-") + 1));
+                num1 = Integer.parseInt(o1.substring(o1.lastIndexOf("-") + 1));
+                num2 = Integer.parseInt(o2.substring(o2.lastIndexOf("-") + 1));
             } else {
                 num1 = Integer.parseInt(o1);
                 num2 = Integer.parseInt(o2);
@@ -102,24 +97,95 @@ public class Sink {
         }
     }
 
+    public static void serializeTicketsAndCommits(String projectName, String filename,
+                                                  List<Ticket> tickets, FileExtension fe) throws IOException {
+        final String datasetPath = DATASET_PATH + "tickets_commits" + File.separator + projectName;
+        File folder = new File(datasetPath);
+
+        if (!folder.exists() && !folder.mkdirs()) {
+            throw new IOException("Unable to create directory: " + datasetPath);
+        }
+
+        File file = getFile(filename, fe, datasetPath);
+
+        if (fe == FileExtension.CSV) {
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                writer.write("TicketKey,InjectedVersion,OpeningVersion,FixedVersion,AffectedVersions,CommitID,Author,Date\n");
+
+                for (Ticket ticket : tickets) {
+                    String ticketKey = ticket.getTicketKey();
+                    String injectedVersion = ticket.getInjectedVersion() != null ? ticket.getInjectedVersion().getReleaseName() : "";
+                    String openingVersion = ticket.getOpeningVersion() != null ? ticket.getOpeningVersion().getReleaseName() : "";
+                    String fixedVersion = ticket.getFixedVersion() != null ? ticket.getFixedVersion().getReleaseName() : "";
+                    String affectedVersions = ticket.getAffectedVersions().stream()
+                            .map(Release::getReleaseName)
+                            .collect(Collectors.joining(";"));
+
+                    for (Commit commit : ticket.getCommitList()) {
+                        String commitId = commit.getRevCommit() != null ? commit.getRevCommit().getName() : "";
+                        String author = commit.getRevCommit() != null && commit.getRevCommit().getAuthorIdent() != null
+                                ? commit.getRevCommit().getAuthorIdent().getName() : "";
+                        String date = (commit.getRevCommit() != null && commit.getRevCommit().getAuthorIdent() != null)
+                                ? commit.getRevCommit().getAuthorIdent().getWhenAsInstant().toString() : "";
+
+                        String line = ticketKey + ',' +
+                                injectedVersion + ',' +
+                                openingVersion + ',' +
+                                fixedVersion + ',' +
+                                affectedVersions + ',' +
+                                commitId + ',' +
+                                author + ',' +
+                                date +
+                                '\n';
+
+                        writer.write(line);
+                    }
+                }
+            }
+        } else if (fe == FileExtension.JSON) {
+            JSONObject json = new JSONObject();
+            for (Ticket ticket : tickets) {
+                JSONObject tJson = new JSONObject();
+                tJson.put("ticketKey", ticket.getTicketKey());
+                tJson.put("injectedVersion", ticket.getInjectedVersion() != null ? ticket.getInjectedVersion().getReleaseName() : JSONObject.NULL);
+                tJson.put("openingVersion", ticket.getOpeningVersion() != null ? ticket.getOpeningVersion().getReleaseName() : JSONObject.NULL);
+                tJson.put("fixedVersion", ticket.getFixedVersion() != null ? ticket.getFixedVersion().getReleaseName() : JSONObject.NULL);
+                tJson.put("affectedVersions", ticket.getAffectedVersions().stream().map(Release::getReleaseName).toList());
+
+                JSONArray commitsArray = new JSONArray();
+                for (Commit commit : ticket.getCommitList()) {
+                    JSONObject c = new JSONObject();
+                    c.put("commitId", commit.getRevCommit() != null ? commit.getRevCommit().getName() : JSONObject.NULL);
+                    c.put("author", commit.getRevCommit() != null && commit.getRevCommit().getAuthorIdent() != null
+                            ? commit.getRevCommit().getAuthorIdent().getName() : JSONObject.NULL);
+                    c.put("date", (commit.getRevCommit() != null && commit.getRevCommit().getAuthorIdent() != null)
+                            ? commit.getRevCommit().getAuthorIdent().getWhenAsInstant().toString()
+                            : JSONObject.NULL);
+                    commitsArray.put(c);
+                }
+
+                tJson.put("commits", commitsArray);
+                json.put(ticket.getTicketKey(), tJson);
+            }
+            sinkJson(projectName, filename, json, fe);
+        }
+    }
+
     public enum FileExtension {
-        JSON,
-        ARFF, CSV
+        JSON, ARFF, CSV
     }
 
     public enum DataSetType {
-        TRAINING,
-        TESTING
+        TRAINING, TESTING
     }
 
     public static void serializeToJson(String projectName, String fileName, Object data,
                                        FileExtension fileExtension) {
-
         if (data instanceof JSONObject jsonObject) {
             Sink.sinkJson(projectName, fileName, jsonObject, fileExtension);
-
         }
     }
+
     public static void serializeProjectAsCsv(@NotNull GitInjection gitInjection) throws IOException {
         String dirPath = DATASET_PATH + File.separator + METHOD + File.separator;
         File directory = new File(dirPath);
@@ -127,72 +193,60 @@ public class Sink {
             throw new IOException("Unable to create directory: " + dirPath);
         }
 
-
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(
                 dirPath + gitInjection.getProject().toLowerCase() + ".csv"))) {
 
             writer.write(MethodHeaders.getCsvHeaders() + "\n");
 
             gitInjection.getJavaClassPerRelease().keySet().stream().sorted(Comparator.comparing(Release::getId))
-                    .forEach(
-                            release -> gitInjection.getJavaClassPerRelease().get(release).forEach(
-                                    javaClass -> {
-                                        StringBuilder builder = new StringBuilder();
-                                        javaClass.getMethodsMetrics().forEach(
-                                                (s, me) -> builder.append(release.getId()).append(';')
-                                                        .append(javaClass.getName()).append(';')
-                                                        .append(s).append(';')
-                                                        .append(me.getLinesOfCode()).append(';')
-                                                        .append(me.getNumberOfChanges()).append(';')
-                                                        .append(me.getAvgChurn()).append(';')
-                                                        .append(me.getStatementCount()).append(';')
-                                                        .append(me.getCyclomaticComplexity()).append(';')
-                                                        .append(me.getCognitiveComplexity()).append(';')
-                                                        .append(me.getNestingDepth()).append(';')
-                                                        .append(me.getParameterCount()).append(';')
-                                                        .append(me.getNumberOfTests()).append(';')
-                                                        .append(me.getAge()).append(';')
-                                                        .append(me.getFanIn()).append(';')
-                                                        .append(me.getFanOut()).append(';')
-                                                        .append(me.getNumberOfCodeSmells()).append(';')
-                                                        .append(me.isBug()).append('\n')
-                                        );
-                                        try {
-                                            writer.write(builder.toString());
-                                        } catch (IOException ignored) {
-                                            throw new IllegalStateException("Something went wrong while writing CSV file");
-                                        }
-                                    }
-                            ));
-
-
+                    .forEach(release -> gitInjection.getJavaClassPerRelease().get(release).forEach(javaClass -> {
+                        StringBuilder builder = new StringBuilder();
+                        javaClass.getMethodsMetrics().forEach((s, me) -> builder.append(release.getId()).append(';')
+                                .append(javaClass.getName()).append(';')
+                                .append(s).append(';')
+                                .append(me.getLinesOfCode()).append(';')
+                                .append(me.getNumberOfChanges()).append(';')
+                                .append(me.getAvgChurn()).append(';')
+                                .append(me.getStatementCount()).append(';')
+                                .append(me.getCyclomaticComplexity()).append(';')
+                                .append(me.getCognitiveComplexity()).append(';')
+                                .append(me.getNestingDepth()).append(';')
+                                .append(me.getParameterCount()).append(';')
+                                .append(me.getNumberOfTests()).append(';')
+                                .append(me.getAge()).append(';')
+                                .append(me.getFanIn()).append(';')
+                                .append(me.getFanOut()).append(';')
+                                .append(me.getNumberOfCodeSmells()).append(';')
+                                .append(me.isBug()).append('\n')
+                        );
+                        try {
+                            writer.write(builder.toString());
+                        } catch (IOException ignored) {
+                            throw new IllegalStateException("Something went wrong while writing CSV file");
+                        }
+                    }));
         }
     }
 
     private static final String CLASSES = "classes";
+
     public static void serializeInjectionToCsv(String projectName, String filename,
                                                List<Release> releases, List<JavaClass> javaClasses,
                                                DataSetType dataSetType) {
 
         final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
-                FileExtension.CSV.name().toLowerCase(Locale.getDefault()) + File.separator
-                + dataSetType.toString()
-                .toLowerCase(Locale.getDefault());
+                FileExtension.CSV.name().toLowerCase(Locale.getDefault()) + File.separator +
+                dataSetType.toString().toLowerCase(Locale.getDefault());
+
         try {
             File file = getFile(filename, FileExtension.CSV, datasetPath);
-
-
             try (FileWriter fileWriter = new FileWriter(file)) {
-
                 fileWriter.append(Sink.CSV_HEADERS_INPUTS);
                 appendInjectionData(fileWriter, releases, javaClasses, false);
-
             }
         } catch (IOException e) {
             SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
-
-
     }
 
     public static void serializeInjectionToArff(String projectName, String filename,
@@ -200,13 +254,11 @@ public class Sink {
                                                 @NotNull DataSetType dataSetType) {
 
         final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
-                FileExtension.ARFF.name().toLowerCase(Locale.getDefault()) + File.separator
-                + dataSetType.toString()
-                .toLowerCase(Locale.getDefault());
+                FileExtension.ARFF.name().toLowerCase(Locale.getDefault()) + File.separator +
+                dataSetType.toString().toLowerCase(Locale.getDefault());
+
         try {
             File file = getFile(filename, FileExtension.ARFF, datasetPath);
-
-
             try (FileWriter fileWriter = new FileWriter(file)) {
                 fileWriter.append(Sink.ARFF_RELATION).append(filename)
                         .append('.')
@@ -218,12 +270,9 @@ public class Sink {
         } catch (IOException e) {
             SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
-
-
     }
 
     public static void serializeResultsToCsv(@NotNull String projectName, List<ClassifierResult> results) {
-
         final String resultsPath = Sink.RESULT_PATH + projectName + File.separator;
         final String filename = projectName.toLowerCase(Locale.getDefault()) + "_report";
         try {
@@ -235,8 +284,36 @@ public class Sink {
         } catch (IOException e) {
             SeLogger.getInstance().getLogger().severe(e.getMessage());
         }
+    }
 
+    private static void appendResultsData(String projectName, FileWriter fileWriter,
+                                          List<ClassifierResult> results) throws IOException {
+        for (ClassifierResult classifierResult : results) {
+            fileWriter.append(projectName).append(",")
+                    .append(String.valueOf(classifierResult.getWalkForwardIteration())).append(",")
+                    .append(String.valueOf(classifierResult.getTrainingPercent())).append(",")
+                    .append(classifierResult.getClassifierName()).append(",");
 
+            fileWriter.append(classifierResult.isFeatureSelection()
+                    ? classifierResult.getCustomClassifier().getFeatureSelectionFilterName() : "None").append(",");
+
+            fileWriter.append(classifierResult.hasSampling()
+                    ? classifierResult.getCustomClassifier().getSamplingFilterName() : "None").append(",");
+
+            fileWriter.append(classifierResult.isCostSensitive()
+                    ? "SensitiveLearning" : "None").append(",");
+
+            fileWriter.append(String.valueOf(classifierResult.getPrecision())).append(",")
+                    .append(String.valueOf(classifierResult.getRecall())).append(",")
+                    .append(String.valueOf(classifierResult.getAreaUnderROC())).append(",")
+                    .append(String.valueOf(classifierResult.getKappa())).append(",")
+                    .append(String.valueOf(classifierResult.getTruePositives())).append(",")
+                    .append(String.valueOf(classifierResult.getFalsePositives())).append(",")
+                    .append(String.valueOf(classifierResult.getTrueNegatives())).append(",")
+                    .append(String.valueOf(classifierResult.getFalseNegatives())).append(",")
+                    .append(String.valueOf(classifierResult.getPofb20())).append(",")
+                    .append(String.valueOf(classifierResult.getNpofb20())).append("\n");
+        }
     }
 
     private static void appendInjectionData(FileWriter fileWriter, List<Release> releases,
@@ -271,10 +348,12 @@ public class Sink {
         String nDefectFixes = String.valueOf(javaClass.getMetrics().getNumberOfDefectFixes());
         String nAuthors = String.valueOf(javaClass.getMetrics().getNumberOfAuthors());
         String className = javaClass.getName();
+
         if (!isArff) {
             fileWriter.append(releaseID).append(",")
                     .append(className).append(",");
         }
+
         fileWriter.append(sizeOfClass).append(",")
                 .append(addedLOC).append(",")
                 .append(avgAddedLOC).append(",")
@@ -294,43 +373,7 @@ public class Sink {
                 .append(isClassBugged).append("\n");
     }
 
-    private static void appendResultsData(String projectName, FileWriter fileWriter,
-                                          List<ClassifierResult> results) throws IOException {
-        for (ClassifierResult classifierResult : results) {
-            fileWriter.append(projectName).append(",")
-                    .append(String.valueOf(classifierResult.getWalkForwardIteration())).append(",")
-                    .append(String.valueOf(classifierResult.getTrainingPercent())).append(",")
-                    .append(classifierResult.getClassifierName()).append(",");
-            if (classifierResult.isFeatureSelection()) {
-                fileWriter.append(classifierResult.getCustomClassifier().getFeatureSelectionFilterName()).append(",");
-            } else {
-                fileWriter.append("None").append(",");
-            }
-            if (classifierResult.hasSampling()) {
-                fileWriter.append(classifierResult.getCustomClassifier().getSamplingFilterName()).append(",");
-            } else {
-                fileWriter.append("None").append(",");
-            }
-            if (classifierResult.isCostSensitive()) {
-                fileWriter.append("SensitiveLearning").append(",");
-            } else {
-                fileWriter.append("None").append(",");
-            }
-            fileWriter.append(String.valueOf(classifierResult.getPrecision())).append(",")
-                    .append(String.valueOf(classifierResult.getRecall())).append(",")
-                    .append(String.valueOf(classifierResult.getAreaUnderROC())).append(",")
-                    .append(String.valueOf(classifierResult.getKappa())).append(",")
-                    .append(String.valueOf(classifierResult.getTruePositives())).append(",")
-                    .append(String.valueOf(classifierResult.getFalsePositives())).append(",")
-                    .append(String.valueOf(classifierResult.getTrueNegatives())).append(",")
-                    .append(String.valueOf(classifierResult.getFalseNegatives())).append("\n");
-        }
-
-    }
-
-
     private static void sinkJson(String projectName, String filename, JSONObject data, FileExtension fe) {
-
         final String projectPath = INJECTION_PATH + projectName;
         try {
             File file = getFile(filename, fe, projectPath);
@@ -342,24 +385,29 @@ public class Sink {
                 mapper.writeValue(fileWriter, sorted);
             }
         } catch (IOException e) {
-            final String severe = "sinkJson: " + e.getMessage();
-            SeLogger.getInstance().getLogger().severe(severe);
+            SeLogger.getInstance().getLogger().severe("sinkJson: " + e.getMessage());
         }
+    }
 
 
+    public static void storeMaxCodeSmells(String fileName, JavaClass jc, Map.Entry<String, MethodMetrics> entry) throws IOException {
+        // Creo un file per salvare info
+        Path path = Paths.get("max_code_smells/" + fileName + ".txt");
+        Files.createDirectories(path.getParent());
+
+        String content = "Class: " + jc.getName() + "\n"
+                + "Method: " + entry.getKey() + "\n"
+                + "Number of Code Smells: " + entry.getValue().getNumberOfCodeSmells() + "\n"
+                + "Statement Count: " + entry.getValue().getStatementCount() + "\n";
+
+        Files.writeString(path, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 
     private static @NotNull File getFile(String filename, FileExtension fe, String path) throws IOException {
         File file = new File(path);
-        if (!file.exists()) {
-            boolean created = file.mkdirs();
-            if (!created) {
-                throw new IOException("Failed to create directories");
-            }
+        if (!file.exists() && !file.mkdirs()) {
+            throw new IOException("Failed to create directories");
         }
-        file = new File(path + File.separator + filename + "." +
-                fe.name().toLowerCase(Locale.getDefault()));
-        return file;
+        return new File(path + File.separator + filename + "." + fe.name().toLowerCase(Locale.getDefault()));
     }
-
 }

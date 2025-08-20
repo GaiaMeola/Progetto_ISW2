@@ -1,13 +1,19 @@
 package org.example.model;
 
-/*devo tenere traccia di una lista di moduli*/
 public class Module {
-    public String id;
-    /*identificativo del modulo, classe, file oppure metodo*/
-    public boolean buggy;
-    public int loc;
-    public double risk; // probabilità di essere buggy (output classificatore)
+    private String id;
+    private boolean buggy;
+    private int loc;
+    private double risk;
 
+    public Module(String id, boolean buggy, int loc, double risk) {
+        this.id = id;
+        this.buggy = buggy;
+        this.loc = loc;
+        this.risk = risk;
+    }
+
+    // Getters
     public String getId() {
         return id;
     }
@@ -24,10 +30,20 @@ public class Module {
         return risk;
     }
 
-    public Module(String id, boolean buggy, int loc, double risk) {
+    // Setters (se servono)
+    public void setId(String id) {
         this.id = id;
+    }
+
+    public void setBuggy(boolean buggy) {
         this.buggy = buggy;
+    }
+
+    public void setLoc(int loc) {
         this.loc = loc;
+    }
+
+    public void setRisk(double risk) {
         this.risk = risk;
     }
 }

@@ -1,6 +1,7 @@
 package org.example.utilities;
 
 import org.example.model.JavaClass;
+import org.example.model.Release;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.BufferedReader;
@@ -8,6 +9,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class CodeSmellParser {
 
@@ -64,6 +66,10 @@ public class CodeSmellParser {
                         ", expected=" + header.getValue());
             }
         }
+    }
+
+    public static void extractCodeSmell(Map<Release, List<JavaClass>> javaClassPerRelease, String project) {
+
     }
 
     private static class JavaCsvInfo{
