@@ -94,7 +94,9 @@ public class PreProcessProportion {
 
     private static double coldStartProportionComputation(Ticket ticket, boolean doActualComputation,
                                                          JSONObject reportJson) {
+
         writeUsedOrNot(ticket, doActualComputation, false, reportJson);
+        //se sta a false non lo devo considerare; lo registro direttamente nel report
 
         String projectKey = ticket.getTicketKey().split("-")[0]; // es. BOOKKEEPER-123 → BOOKKEEPER
 

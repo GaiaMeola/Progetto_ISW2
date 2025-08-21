@@ -31,11 +31,14 @@ public class JiraInjection {
     }
 
     public void injectReleases() throws IOException, URISyntaxException {
-        this.releases = new ArrayList<>();
-        int i = 0;
+
+        this.releases = new ArrayList<>(); //lista vuota in cui ci saranno tutti gli oggetti Release
+        int i = 0; //ID Progressivo alla Release
+
         String url = "https://issues.apache.org/jira/rest/api/latest/project/" + this.projName;
         JSONObject object = WebJsonReader.readJsonFromUrl(url);
         JSONArray versions = object.getJSONArray("versions");
+
         for (; i < versions.length(); i++) {
             String releaseName;
             String releaseDate;
@@ -45,6 +48,7 @@ public class JiraInjection {
                 releaseName = releaseJsonObject.get("name").toString();
                 releases.add(new Release(releaseName, LocalDate.parse(releaseDate)));
             }
+            //filtro le release senza data
         }
 
         releases.sort(Comparator.comparing(Release::getReleaseDate));
@@ -52,9 +56,18 @@ public class JiraInjection {
         for (Release release : releases) {
             release.setId(++i);
         }
-
     }
 
+    public void compareProportionMethods(String outputCsvPath) {
+        if (this.fixedTickets == null || this.fixedTickets.isEmpty()) {
+            SeLogger.getInstance().getLogger().warning("Nessun ticket disponibile per la comparazione.");
+            return;
+        }
+        ProportionComparator comparator = new ProportionComparator(this.fixedTickets);
+        comparator.evaluate(outputCsvPath);
+    }
+
+    //metodo per recuperare i ticket da Jira
     public void injectTickets() throws IOException, URISyntaxException {
         this.pullIssues();
         this.filterFixedApplyingProportion();
@@ -71,18 +84,22 @@ public class JiraInjection {
     }
 
     /**
-     * This method is used to load tickets from JIRA
+     * Per caricare tickets da JIRA
      */
-
     public void pullIssues() throws IOException, URISyntaxException {
+
         int j;
         int i = 0;
         int total;
+
+        //setup iniziale
         this.ticketsWithIssues = new ArrayList<>();
         int tickets = 0;
         int ticketWithIssue = 0;
+
         do {
             j = i + 1000;
+            //query
             String url = "https://issues.apache.org/jira/rest/api/2/search?jql=project=%22"
                     + this.projName + "%22AND%22issueType%22=%22Bug%22AND" +
                     "(%22status%22=%22Closed%22OR%22status%22=%22Resolved%22)" +
@@ -91,6 +108,8 @@ public class JiraInjection {
             JSONObject json = WebJsonReader.readJsonFromUrl(url);
             JSONArray issues = json.getJSONArray("issues");
             total = json.getInt("total");
+
+
             for (; i < total && i < j; i++) {
                 //Iterate through each bug
                 tickets++;
@@ -101,9 +120,14 @@ public class JiraInjection {
                 LocalDate creationDate = LocalDate.parse(creationDateString.substring(0,10));
                 LocalDate resolutionDate = LocalDate.parse(resolutionDateString.substring(0,10));
                 JSONArray affectedVersionsArray = fields.getJSONArray("versions");
+
+
                 Release openingVersion = getReleaseAfterOrEqualDate(creationDate, this.releases);
                 Release fixedVersion =  getReleaseAfterOrEqualDate(resolutionDate, this.releases);
+                //verifico la validità delle AffectedVersions
                 checkValidAffectedVersions(affectedVersionsArray);
+
+                //ticket malformati vengono ignorati
                 if(!this.affectedReleases.isEmpty()
                         && openingVersion!=null
                         && fixedVersion!=null
@@ -111,6 +135,8 @@ public class JiraInjection {
                         || openingVersion.getReleaseDate().isAfter(fixedVersion.getReleaseDate()))){
                     continue;
                 }
+
+                //inoltre, si escludono anche i ticket antecedenti alla prima release
                 if(openingVersion != null && fixedVersion != null && openingVersion.getId() !=
                         this.releases.getFirst().getId()){
                     this.ticketsWithIssues.add(new Ticket(key, creationDate, resolutionDate, openingVersion,
@@ -123,21 +149,37 @@ public class JiraInjection {
         String msg = String.format("project=%s, ticket=%d, ticketWithAffectedVersion=%d", projName,
                 tickets, ticketWithIssue);
         SeLogger.getInstance().getLogger().info(msg);
+    } //solo ticket con dati coerenti al più mancanti
+
+    private void checkValidAffectedVersions(@NotNull JSONArray affectedVersionsArray) {
+        this.affectedReleases = new ArrayList<>();
+        for (int i = 0; i < affectedVersionsArray.length(); i++) {
+            String affectedVersionName = affectedVersionsArray.getJSONObject(i).get("name").toString();
+            for (Release release : this.releases) {
+                if (Objects.equals(affectedVersionName, release.getReleaseName())) {
+                    this.affectedReleases.add(release);
+                    break;
+                }
+            }
+        }
+        this.affectedReleases.sort(Comparator.comparing(Release::getReleaseDate));
     }
 
     private void filterFixedApplyingProportion() {
+
         List<Ticket> proportionTickets = new ArrayList<>();
         this.fixedTickets = new ArrayList<>();
         double proportion;
         PreProcessProportion preProcessProportion = new PreProcessProportion();
+
         JSONObject proportionResults = new JSONObject();
         for(Ticket ticket : this.getTicketsWithIssues()){
-            if(!ticket.isCorrectTicket()){
+            if(!ticket.isCorrectTicket()){ //ticket non corretti --> per stimare IV mancante
                 proportion = preProcessProportion.computeProportion(proportionTickets,
                         ticket, true, proportionResults);
                 this.preProcessTicketWithProportion(ticket, proportion);
                 this.adjustAffectedVersions(ticket);
-            }else{
+            } else{ //ticket corretti --> per usarlo come base statistica
                 preProcessProportion.computeProportion(proportionTickets, ticket,
                         false, proportionResults);
                 this.adjustAffectedVersions(ticket);
@@ -149,13 +191,11 @@ public class JiraInjection {
 
         Sink.serializeToJson(this.projName, "Proportion", proportionResults,
                 Sink.FileExtension.JSON);
-
-
-
     }
 
-
+    //metodo usato per Tickets non corretti; utilizziamo la formula fornita dal professore
     private void preProcessTicketWithProportion(@NotNull Ticket ticket, double proportion) {
+
         List<Release> affectedVersionsList = new ArrayList<>();
         int injectedVersionId;
         //IV = max(1; FV-(FV-OV)*P)
@@ -175,6 +215,8 @@ public class JiraInjection {
         ticket.setAffectedVersions(affectedVersionsList);
         ticket.setInjectedVersion(affectedVersionsList.getFirst());
     }
+
+    //aggiunge tutte le affected versions di un ticket
     private void adjustAffectedVersions(@NotNull Ticket ticket) {
         List<Release> completeAffectedVersionsList = new ArrayList<>();
         for(int i = ticket.getInjectedVersion().getId(); i < ticket.getFixedVersion().getId(); i++){
@@ -188,21 +230,6 @@ public class JiraInjection {
         }
         completeAffectedVersionsList.sort(Comparator.comparing(Release::getReleaseDate));
         ticket.setAffectedVersions(completeAffectedVersionsList);
-    }
-
-    private void checkValidAffectedVersions(@NotNull JSONArray affectedVersionsArray) {
-        this.affectedReleases = new ArrayList<>();
-        for (int i = 0; i < affectedVersionsArray.length(); i++) {
-            String affectedVersionName = affectedVersionsArray.getJSONObject(i).get("name").toString();
-            for (Release release : this.releases) {
-                if (Objects.equals(affectedVersionName, release.getReleaseName())) {
-                    this.affectedReleases.add(release);
-                    break;
-                }
-            }
-        }
-        this.affectedReleases.sort(Comparator.comparing(Release::getReleaseDate));
-
     }
 
     private @Nullable Release getReleaseAfterOrEqualDate(LocalDate specificDate, @NotNull List<Release> releasesList) {
@@ -240,9 +267,7 @@ public class JiraInjection {
         }
         return retMap;
     }
-    public List<Release> getReleases() {
-        return releases;
-    }
+
 
     public List<Ticket> getTicketsWithIssues() {
         return ticketsWithIssues;
@@ -250,5 +275,10 @@ public class JiraInjection {
 
     public List<Ticket> getFixedTickets() {
         return fixedTickets;
+    }
+
+    //Restituisce la lista delle release di ogni progetto
+    public List<Release> getReleases() {
+        return releases;
     }
 }
