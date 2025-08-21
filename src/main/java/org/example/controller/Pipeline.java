@@ -172,12 +172,12 @@ public class Pipeline implements Runnable{
 
         } catch (Exception e) {
             logger.severe("error: " + e.getMessage());
+            e.printStackTrace();
         } finally {
             long overallEnd = System.nanoTime();
             info = getPipeMsg("total processing took: " + getTimeInSeconds(overallStart, overallEnd) +
                     seconds);
             logger.info(info);
-
         }
     }
 
@@ -224,6 +224,5 @@ public class Pipeline implements Runnable{
                 SeLogger.SECONDS;
         logger.info(finalMessage);
         this.latch.countDown();
-
     }
 }

@@ -1,6 +1,7 @@
 package org.example.model;
 
 import com.github.javaparser.Position;
+import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -10,11 +11,9 @@ import org.example.utilities.JavaParserUtil;
 import java.util.*;
 
 public class JavaClass {
-    private static final String MAIN_METHOD_SIGNATURE = " public static void main(String[] args)";
 
     private final String name;
     private final String classBody;
-
     private String packageName = "";
     private String simpleName = "";
 
@@ -26,78 +25,82 @@ public class JavaClass {
     private final List<Integer> lOCAddedByClass;
     private final List<Integer> lOCRemovedByClass;
 
+    private static final String MAIN_METHOD_SIGNATURE = "main";
+
     public JavaClass(String name, String classBody, Release release, boolean update) {
         this.name = name;
         this.classBody = classBody;
+        this.release = release;
         this.methods = new HashMap<>();
         this.methodsMetrics = new HashMap<>();
-        this.release = release;
-        this.updateMethodsMap(update);
         this.metrics = new Metrics();
         this.classCommits = new ArrayList<>();
         this.lOCAddedByClass = new ArrayList<>();
         this.lOCRemovedByClass = new ArrayList<>();
+        parseAndUpdateMethods(update);
     }
 
-    private void updateMethodsMap(boolean update) {
-        CompilationUnit cu = StaticJavaParser.parse(this.classBody);
-        cu.getPackageDeclaration().ifPresent(packageDeclaration ->
-                this.packageName = packageDeclaration.getNameAsString());
-        cu.getTypes().stream()
-                .findFirst()
+    private void parseAndUpdateMethods(boolean update) {
+        CompilationUnit cu;
+        try {
+            cu = StaticJavaParser.parse(this.classBody);
+        } catch (ParseProblemException e) {
+            System.err.println("Errore nel parsing della classe " + name + ": " + e.getMessage());
+            return;
+        }
+
+        // Package e nome semplice della classe
+        cu.getPackageDeclaration().ifPresent(pkg -> this.packageName = pkg.getNameAsString());
+        cu.getTypes().stream().findFirst()
                 .map(TypeDeclaration::getNameAsString)
-                .ifPresent(className -> this.simpleName = className);
+                .ifPresent(name -> this.simpleName = name);
 
-        cu.findAll(MethodDeclaration.class).forEach(methodDeclaration -> {
-            String signature = JavaParserUtil.getSignature(methodDeclaration);
-            methods.put(signature, JavaParserUtil.getStringBody(methodDeclaration));
-            if (update) {
-                MethodMetrics methodMetrics = new MethodMetrics();
-                methodsMetrics.put(signature, methodMetrics);
-                methodMetrics.setParameterCount(JavaParserUtil.computeParameterCount(methodDeclaration));
-                methodMetrics.setLinesOfCode(JavaParserUtil.computeEffectiveLOC(methodDeclaration));
-                methodMetrics.setStatementCount(JavaParserUtil.computeStatementCount(methodDeclaration));
-                methodMetrics.setCyclomaticComplexity(JavaParserUtil.computeCyclomaticComplexity(methodDeclaration));
-                methodMetrics.setNestingDepth(JavaParserUtil.computeNestingDepth(methodDeclaration));
-                methodMetrics.setMethodAccessor(methodDeclaration.getAccessSpecifier().asString());
-                methodDeclaration.getBody().ifPresent(body ->
-                        methodMetrics.setCognitiveComplexity(JavaParserUtil.calculateCognitiveComplexity(body)));
-                methodMetrics.setBeginLine(methodDeclaration.getBegin().orElse(new Position(0, 0)).line);
-                methodMetrics.setEndLine(methodDeclaration.getEnd().orElse(new Position(0, 0)).line);
-                methodMetrics.setSimpleName(methodDeclaration.getNameAsString());
-                methodMetrics.setAge(this.release.getId());
-            }
-        });
-
-        methodsMetrics.keySet().removeIf(key -> key.contains(MAIN_METHOD_SIGNATURE));
-        methods.keySet().removeIf(key -> key.contains(MAIN_METHOD_SIGNATURE));
+        // Parsing dei metodi
+        cu.findAll(MethodDeclaration.class).forEach(md -> processMethod(md, update));
     }
 
+    private void processMethod(MethodDeclaration methodDeclaration, boolean update) {
+        String signature = JavaParserUtil.getSignature(methodDeclaration);
+        methods.put(signature, JavaParserUtil.getStringBody(methodDeclaration));
+
+        // Salta il main
+        if (MAIN_METHOD_SIGNATURE.equals(methodDeclaration.getNameAsString())) return;
+
+        if (!update) return; // se update=false, non calcolare metriche
+
+        // Calcola metriche
+        MethodMetrics methodMetrics = new MethodMetrics();
+        methodsMetrics.put(signature, methodMetrics);
+
+        methodMetrics.setParameterCount(JavaParserUtil.computeParameterCount(methodDeclaration));
+        methodMetrics.setLinesOfCode(JavaParserUtil.computeEffectiveLOC(methodDeclaration));
+        methodMetrics.setStatementCount(JavaParserUtil.computeStatementCount(methodDeclaration));
+        methodMetrics.setCyclomaticComplexity(JavaParserUtil.computeCyclomaticComplexity(methodDeclaration));
+        methodMetrics.setNestingDepth(JavaParserUtil.computeNestingDepth(methodDeclaration));
+        methodMetrics.setMethodAccessor(methodDeclaration.getAccessSpecifier().asString());
+        methodDeclaration.getBody().ifPresent(body ->
+                methodMetrics.setCognitiveComplexity(JavaParserUtil.calculateCognitiveComplexity(body))
+        );
+        methodMetrics.setBeginLine(methodDeclaration.getBegin().orElse(new Position(0, 0)).line);
+        methodMetrics.setEndLine(methodDeclaration.getEnd().orElse(new Position(0, 0)).line);
+        methodMetrics.setSimpleName(methodDeclaration.getNameAsString());
+        methodMetrics.setAge(this.release.getId());
+    }
+
+    // Commit e LOC
     public void addCommitToClass(Commit commit) {
-        this.classCommits.add(commit);
+        classCommits.add(commit);
     }
 
-    public void addLOCAddedByClass(Integer lOCAddedByEntry) {
-        lOCAddedByClass.add(lOCAddedByEntry);
+    public void addLOCAddedByClass(Integer locAdded) {
+        lOCAddedByClass.add(locAdded);
     }
 
-    public void addLOCRemovedByClass(Integer lOCRemovedByEntry) {
-        lOCRemovedByClass.add(lOCRemovedByEntry);
+    public void addLOCRemovedByClass(Integer locRemoved) {
+        lOCRemovedByClass.add(locRemoved);
     }
 
-    @Override
-    public String toString() {
-        return "JavaClass{" +
-                "name='" + name + '\'' +
-                ", contentOfClass='" + classBody + '\'' +
-                ", release=" + release +
-                ", metrics=" + metrics +
-                ", commitsThatTouchTheClass=" + classCommits +
-                ", lOCAddedByClass=" + lOCAddedByClass +
-                ", lOCRemovedByClass=" + lOCRemovedByClass +
-                '}';
-    }
-
+    // Getters e setter
     public String getClassName() {
         return this.packageName + '.' + this.simpleName;
     }
@@ -154,7 +157,24 @@ public class JavaClass {
         return lOCRemovedByClass;
     }
 
+    /**
+     * Verifica se la classe ha almeno un metodo parsato correttamente.
+     * @return true se la mappa dei metodi non è vuota, false altrimenti
+     */
     public boolean isHasMap() {
-        return false;
+        return methods != null && !methods.isEmpty();
+    }
+
+    @Override
+    public String toString() {
+        return "JavaClass{" +
+                "name='" + name + '\'' +
+                ", classBody='" + classBody + '\'' +
+                ", release=" + release +
+                ", metrics=" + metrics +
+                ", commits=" + classCommits +
+                ", locAdded=" + lOCAddedByClass +
+                ", locRemoved=" + lOCRemovedByClass +
+                '}';
     }
 }

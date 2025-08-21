@@ -17,6 +17,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/deliveryOutput/datasets/tickets_commits/BOOKKEEPER/bookkeeper_tickets_commits.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/deliveryOutput/results/BOOKKEEPER/bookkeeper_report.csv">
           <value>
             <Attribute>

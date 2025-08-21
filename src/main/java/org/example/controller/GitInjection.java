@@ -24,6 +24,7 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.example.logging.SeLogger;
 import org.example.model.*;
 import org.example.utilities.CodeSmellParser;
+import org.example.utilities.ConfigLoader;
 import org.example.utilities.JavaParserUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -54,10 +55,10 @@ public class GitInjection {
     public static final String RELEASE = "release";
     public static final String TEST = "Test";
     public static final String JAVA_EXTENTION = ".java";
-    public static final String SYS_CUT_PERCENTAGE = "SYS_CUT_PERCENTAGE";
     private static final String SYS_PMD_HOME = "";
     private final String repoPath;
     private final String lastBranch;
+    private final double limitPercentage;
 
     private List<Ticket> tickets;
     private final List<Release> releases;
@@ -114,7 +115,6 @@ public class GitInjection {
     private final Map<RevCommit, List<String>> modifiedClassesForCommit;
     private Map<Release, List<JavaClass>> javaClassPerRelease = null;
     private final String project;
-    private final double limitPercentage;
     private final Logger logger = SeLogger.getInstance().getLogger();
     private final String logName;
 
@@ -142,9 +142,11 @@ public class GitInjection {
         this.modifiedClassesForCommit = new HashMap<>();
         this.logName = this.getClass().getSimpleName() + "#" + targetName;
         this.lastBranch = repository.getBranch();
-        limitPercentage = Double.parseDouble(System.getProperty(SYS_CUT_PERCENTAGE));
+        // Legge dal file config.properties
+        this.limitPercentage = ConfigLoader.getDouble("cut.percentage", 1.0);
         infoLog("setup percentage for releases: " + limitPercentage);
     }
+
     private void infoLog(String msg) {
         String info = logName + "[" + Thread.currentThread().getStackTrace()[2].getMethodName() + "]: " + msg;
         logger.info(info);
@@ -532,52 +534,57 @@ public class GitInjection {
     }
 
     /**
-     * Fain in Fan out calculation Method
+     * Fan-in / Fan-out calculation method
      */
     private void checkMethodUsage() {
         javaClassPerRelease.forEach((release, classes) -> {
 
+            // --- STEP 1: costruzione mappa caller -> callee ---
             Map<String, Set<String>> methodCalls = new HashMap<>();
 
             classes.forEach(jc -> {
-                String className = jc.getClassName();
-                CompilationUnit cu = StaticJavaParser.parse(jc.getClassBody());
+                final String className = jc.getClassName();
+                final CompilationUnit cu = StaticJavaParser.parse(jc.getClassBody());
 
                 cu.findAll(MethodDeclaration.class).forEach(methodDecl -> {
-                    String callerSig = className + "." + JavaParserUtil.getSignature(methodDecl);
-                    Set<String> callee = new HashSet<>();
+                    final String callerSig = className + "." + JavaParserUtil.getSignature(methodDecl);
+                    final Set<String> callees = new HashSet<>();
 
                     methodDecl.findAll(MethodCallExpr.class)
                             .stream()
                             .map(MethodCallExpr::getNameAsString)
-                            .forEach(callee::add);
+                            .forEach(callees::add);
 
-                    methodCalls.put(callerSig, callee);
+                    methodCalls.put(callerSig, callees);
                 });
             });
 
+            // --- STEP 2: calcolo fan-out per ciascun metodo ---
             classes.forEach(jc -> {
-                String className = jc.getClassName();
+                final String className = jc.getClassName();
                 jc.getMethodsMetrics().forEach((methodSig, mm) -> {
-                    String fullMethodSig = className + "." + methodSig;
-                    int fanOut = methodCalls.getOrDefault(fullMethodSig, Collections.emptySet()).size();
+                    final String fullMethodSig = className + "." + methodSig;
+                    final int fanOut = methodCalls.getOrDefault(fullMethodSig, Collections.emptySet()).size();
                     mm.setFanOut(fanOut);
                 });
             });
 
+            // --- STEP 3: calcolo fan-in (chi chiama chi) ---
             classes.forEach(callerJc -> {
-                CompilationUnit cu = StaticJavaParser.parse(callerJc.getClassBody());
+                final CompilationUnit cu = StaticJavaParser.parse(callerJc.getClassBody());
+
                 cu.findAll(MethodDeclaration.class).forEach(methodDecl ->
                         methodDecl.getBody().ifPresent(block ->
                                 block.findAll(MethodCallExpr.class).forEach(callStmt -> {
-                                    String calleeName = callStmt.getNameAsString();
-                                    int argCount = callStmt.getArguments().size();
+                                    final String calleeName = callStmt.getNameAsString();
+                                    final int argCount = callStmt.getArguments().size();
 
                                     classes.forEach(possibleCallee ->
                                             possibleCallee.getMethodsMetrics().values().stream()
-                                                    .filter(mm -> mm.getSimpleName().equals(calleeName)
+                                                    .filter(mm -> Objects.equals(mm.getSimpleName(), calleeName)
                                                             && mm.getParameterCount() == argCount)
-                                                    .forEach(mm -> mm.setFanIn(mm.getFanIn() + 1)));
+                                                    .forEach(mm -> mm.setFanIn(mm.getFanIn() + 1))
+                                    );
                                 })
                         )
                 );
@@ -888,13 +895,21 @@ public class GitInjection {
 
     private static void checkMethodDiff(JavaClass javaClass, Map.Entry<String, String> entry,
                                         Map<String, String> methodMap) {
+
+        MethodMetrics metrics = javaClass.getMethodsMetrics().get(entry.getKey());
+        if (metrics == null) {
+            // Se non esiste, lo creo e lo aggiungo
+            metrics = new MethodMetrics();
+            javaClass.getMethodsMetrics().put(entry.getKey(), metrics);
+        }
+
         if (!methodMap.containsKey(entry.getKey())) {
-            javaClass.getMethodsMetrics().get(entry.getKey()).setBug(true);
-        }else {
-            String fixedBody = (methodMap.get(entry.getKey()));
-            String oldBody = (entry.getValue());
+            metrics.setBug(true);
+        } else {
+            String fixedBody = methodMap.get(entry.getKey());
+            String oldBody = entry.getValue();
             if (!fixedBody.equals(oldBody)) {
-                javaClass.getMethodsMetrics().get(entry.getKey()).setBug(true);
+                metrics.setBug(true);
             }
         }
     }
