@@ -15,23 +15,31 @@ import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.treewalk.filter.PathSuffixFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.example.logging.SeLogger;
 import org.example.model.*;
-import org.example.utilities.CodeSmellParser;
 import org.example.utilities.JavaParserUtil;
+import org.example.utilities.Sink;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -84,21 +92,6 @@ public class PreProcessJavaClass {
         this.repoPath = repoPath;
     }
 
-    public void setLastBranch(String lastBranch) {
-        this.lastBranch = lastBranch;
-    }
-
-    // --- logging lazy helpers (Sonar-friendly) ---
-    private void logInfo(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.INFO)) logger.info(msgSupplier.get());
-    }
-    private void logWarning(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.WARNING)) logger.warning(msgSupplier.get());
-    }
-    private void logError(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.SEVERE)) logger.severe(msgSupplier.get());
-    }
-
     /**
      * Returning the ClassName and Body
      *
@@ -125,76 +118,259 @@ public class PreProcessJavaClass {
         return allClasses;
     }
 
-    /**
-     * Preparing the Java Classes linking commits and Releases
-     */
     public void preprocessJavaClasses() throws IOException {
-        this.javaClasses = new ArrayList<>();
+        // Lista thread-safe, non serve synchronized manuale
+        this.javaClasses = Collections.synchronizedList(new ArrayList<>());
 
-        // DEBUG: loggare tutte le release
         logInfo(() -> "Total releases found = " + this.releases.size());
-        for (Release r : this.releases) {
-            logInfo(() -> "Release " + r.getId());
-        }
 
-        // Itera su tutti i commit già associati alle release
+        // Mappa releaseId -> lista classi (per ottimizzare marking buggy)
+        Map<Integer, List<JavaClass>> classesByRelease = new HashMap<>();
+
+        // --- PARSING DELLE CLASSI PER OGNI COMMIT ---
         for (Release release : this.releases) {
             List<Commit> commitsInRelease = release.getCommitList();
             if (commitsInRelease == null || commitsInRelease.isEmpty()) continue;
 
-            // I commit sono già ordinati cronologicamente da injectCommits()
             for (Commit commit : commitsInRelease) {
-                Map<String, String> nameAndClassContent;
                 try {
-                    nameAndClassContent = getAllClassesNameAndContent(commit.getRevCommit(), this.repository);
+                    // 1️⃣ Ottieni solo i nomi delle classi modificate in questo commit
+                    List<String> touchedClasses = getTouchedClassesNames(commit.getRevCommit());
+
+                    // 2️⃣ Per ogni classe modificata, recupera il contenuto e crea la JavaClass
+                    touchedClasses.stream()
+                            .filter(name -> !name.contains(TEST))
+                            .forEach(className -> {
+                                try {
+                                    String content = getContent(commit.getRevCommit(), className, this.repository);
+                                    JavaClass jc = new JavaClass(className, content, commit.getRelease(), true);
+                                    if (jc.isHasMap()) {
+                                        this.javaClasses.add(jc);
+                                        classesByRelease
+                                                .computeIfAbsent(commit.getRelease().getId(), k -> new ArrayList<>())
+                                                .add(jc);
+                                    }
+                                } catch (IOException e) {
+                                    logWarning(() -> "Skipping class " + className + " in commit " +
+                                            commit.getRevCommit().getName() + " due to IO error: " + e.getMessage());
+                                }
+                            });
+
+                    logInfo(() -> "Processed " + touchedClasses.size() +
+                            " touched classes for commit " + commit.getRevCommit().getName());
+
                 } catch (IOException e) {
                     logWarning(() -> "Skipping commit " + commit.getRevCommit().getName() +
                             " due to IO error: " + e.getMessage());
-                    continue;
                 }
-
-                nameAndClassContent.forEach((name, content) -> {
-                    if (!name.contains(TEST)) {
-                        javaClasses.add(new JavaClass(name, content, commit.getRelease(), true));
-                    }
-                });
-
-                // Rimuove classi non valide
-                this.javaClasses.removeIf(jc -> !jc.isHasMap());
             }
         }
 
-        // Analisi vera e propria
+        // --- ANALISI BUGGY/NON BUGGY ---
         this.fillClassesInfo();
         logInfo(() -> "fillClassInfo");
 
-        this.checkUpdateInClassCommitted();
-        logInfo(() -> "checkUpdateCommitted");
+        this.javaClasses.forEach(jc -> jc.getMetrics().setBug(false));
 
-        this.javaClasses.sort(Comparator.comparing(JavaClass::getName));
-        this.parseJavaClassPerRelease();
-        logInfo(() -> "parsingClassPerRelease: release-size=" + this.javaClassPerRelease.size());
+        for (Ticket ticket : this.tickets) {
+            List<Commit> ticketCommits = ticket.getCommitList();
+            Release injectedVersion = ticket.getInjectedVersion();
 
-        this.logBugPercentage();
+            for (Commit commit : ticketCommits) {
+                RevCommit revCommit = commit.getRevCommit();
+                LocalDate commitDate = LocalDate.ofInstant(revCommit.getCommitterIdent().getWhenAsInstant(), ZoneId.systemDefault());
 
-        // ---- Analisi metodi ----
+                if (!commitDate.isAfter(ticket.getResolutionDate()) && !commitDate.isBefore(ticket.getCreationDate())) {
+                    List<String> touchedClasses = getTouchedClassesNames(revCommit);
 
-        logTime("check-Age", this::checkMethodAge);
-        logTime("check usage", this::checkMethodUsage);
-        logTime("updateMethodPerClassCommits", this::updateMethodPerClassCommits);
-        logTime("check code smells", () -> {
-            this.setupCodeSmellPMD();
-            CodeSmellParser.extractCodeSmell(this.javaClassPerRelease, this.project);
-        });
+                    for (String modifiedClass : touchedClasses) {
+                        classesByRelease.entrySet().stream()
+                                .filter(e -> e.getKey() >= injectedVersion.getId() && e.getKey() < commit.getRelease().getId())
+                                .flatMap(e -> e.getValue().stream())
+                                .filter(jc -> jc.getName().equals(modifiedClass))
+                                .forEach(jc -> jc.getMetrics().setBug(true));
+                    }
+                }
+            }
+        }
 
-        this.foundMostCodeSmells();
+        // --- SALVATAGGIO JSON BUGGY/NON BUGGY ---
+        JSONArray buggyClassesArray = new JSONArray();
+        for (JavaClass jc : this.javaClasses) {
+            JSONObject entry = new JSONObject();
+            entry.put("release", jc.getRelease().getReleaseName());
+            entry.put("class", jc.getClassName());
+            entry.put("buggy", jc.getMetrics().isBug());
+            buggyClassesArray.put(entry);
+        }
+
+        // Usa la struttura centralizzata di Sink
+        String buggyClassesPath = Sink.buildProjectPath("buggy_classes", this.project);
+        logInfo(() -> "Tentativo di creare directory: " + buggyClassesPath);
+        Files.createDirectories(Paths.get(buggyClassesPath));
+        logInfo(() -> "Directory creata, javaClasses.size()=" + javaClasses.size());
+
+        String buggyClassesFile = buggyClassesPath + "buggy_classes_report.json";
+        try (FileWriter file = new FileWriter(buggyClassesFile)) {
+            file.write(buggyClassesArray.toString(4));
+            logInfo(() -> "Buggy classes report salvato in: " + buggyClassesFile);
+        } catch (IOException e) {
+            logWarning(() -> "Errore durante il salvataggio del report buggy classes: " + e.getMessage());
+        }
     }
-    private void logTime(String name, Runnable action) {
-        logInfo(() -> "start " + name);
-        long start = System.currentTimeMillis();
-        action.run();
-        long end = System.currentTimeMillis();
-        logInfo(() -> "done " + name + " took=" + ((end - start) / 1e3) + "s");
+
+    /**
+     * Restituisce il contenuto di un file in un commit specifico.
+     */
+    private String getContent(RevCommit commit, String filePath, Repository repository) throws IOException {
+        try (RevWalk revWalk = new RevWalk(repository)) {
+            RevTree tree = commit.getTree();
+
+            try (TreeWalk treeWalk = new TreeWalk(repository)) {
+                treeWalk.addTree(tree);
+                treeWalk.setRecursive(true);
+                treeWalk.setFilter(PathFilter.create(filePath));
+
+                if (!treeWalk.next()) {
+                    throw new FileNotFoundException("File " + filePath + " non trovato nel commit " + commit.getName());
+                }
+
+                ObjectId objectId = treeWalk.getObjectId(0);
+                ObjectLoader loader = repository.open(objectId);
+                return new String(loader.getBytes(), StandardCharsets.UTF_8);
+            }
+        }
+    }
+
+    // ---- PARTE COMMENTATA ORIGINALE ----
+
+//    this.checkUpdateInClassCommitted();
+//    logInfo(() -> "checkUpdateCommitted");
+//
+//    this.javaClasses.sort(Comparator.comparing(JavaClass::getName));
+//    this.parseJavaClassPerRelease();
+//    logInfo(() -> "parsingClassPerRelease: release-size=" + this.javaClassPerRelease.size());
+//
+//    this.logBugPercentage();
+//
+//    // ---- Analisi metodi ----
+//
+//    logTime("check-Age", this::checkMethodAge);
+//    logTime("check usage", this::checkMethodUsage);
+//    logTime("updateMethodPerClassCommits", this::updateMethodPerClassCommits);
+//    logTime("check code smells", () -> {
+//        this.setupCodeSmellPMD();
+//        CodeSmellParser.extractCodeSmell(this.javaClassPerRelease, this.project);
+//    });
+//
+//    this.foundMostCodeSmells();
+
+    private void fillClassesInfo() throws IOException {
+        this.fillClassesInfo(this.tickets, this.javaClasses);
+    }
+
+    public void fillClassesInfo(List<Ticket> theTickets, @NotNull List<JavaClass> theClasses) throws IOException {
+
+        //setup iniziale; ogni classe innanzitutto parte come NON BUGGY
+        for (JavaClass javaClass : theClasses) javaClass.getMetrics().setBug(false);
+
+        for (Ticket ticket : theTickets) {
+            List<Commit> commitsContainingTicket = ticket.getCommitList();
+            //per ogni ticket, si guardano tutti i commit collegati a quel ticket
+            Release injectedVersion = ticket.getInjectedVersion();
+            for (Commit commit : commitsContainingTicket) {
+                SimpleDateFormat formatter = new SimpleDateFormat(GitInjection.LOCAL_DATE_FORMAT);
+                RevCommit revCommit = commit.getRevCommit();
+                LocalDate commitDate = LocalDate.parse(formatter.format(Date.from(revCommit.getCommitterIdent().getWhenAsInstant())));
+                if (!commitDate.isAfter(ticket.getResolutionDate()) && !commitDate.isBefore(ticket.getCreationDate())) {
+                    //si prendono solo i commit la cui data è compresa tra la creazione e la risoluzione del ticket
+                    List<String> modifiedClassesNames = getTouchedClassesNames(revCommit);
+                    //verifico tutte le classi che sono state toccate in quel periodo temporale
+                    Release releaseOfCommit = commit.getRelease();
+                    modifiedClassesForCommit.putIfAbsent(revCommit, modifiedClassesNames);
+                    //lista che tiene traccia per ogni commit delle classi modificate
+                    for (String modifiedClass : modifiedClassesNames) {
+                        checkForAnyBug(modifiedClass, injectedVersion, releaseOfCommit);
+                        //eventuale marcatura come classe BUGGY
+                    }
+                }
+            }
+        }
+    }
+
+    private void checkForAnyBug(String modifiedClass, Release injectedVersion, Release fixedVersion) {
+
+        List<JavaClass> fixedClasses = this.javaClasses.stream().filter(javaClass -> javaClass.getRelease().getId() == fixedVersion.getId()).toList();
+
+        for (JavaClass javaClass : this.javaClasses) {
+            //si guardano tutte le classi di tutte le release
+            if (javaClass.getName().equals(modifiedClass)
+                    //la classe deve avere lo stesso nome della classe modificata nel commit
+                    && javaClass.getRelease().getId() < fixedVersion.getId()
+                    //release della classe deve essere prima del fix, ma dopo injected
+                    && javaClass.getRelease().getId() >= injectedVersion.getId()) {
+                //se tutte e tre le condizioni sono vere la marco come buggy
+                javaClass.getMetrics().setBug(true);
+
+                javaClass.getMethods().entrySet().forEach(entry ->
+                        fixedClasses.stream().filter(jc -> jc.getName().equals(modifiedClass)).findAny().ifPresent(
+                                //qui prendiamo solamente le versioni corrette delle classi
+                                fixedClass -> {
+                                    Map<String, String> methodMap = fixedClass.getMethods();
+                                    checkMethodDiff(javaClass, entry, methodMap);
+                                    //qui invece: marcatura a livello di metodo
+                                }
+                        ));
+            }
+        }
+    }
+
+    private static void checkMethodDiff(JavaClass javaClass, Map.Entry<String, String> entry, Map<String, String> methodMap) {
+        //riceve la classe Java marcata come BUGGY di cui si vogliono marcare i metodi
+        //poi la copia (nomeMetodo, corpoMetodo)
+        //lista di tutti i metodi nella versione fixed
+        MethodMetrics metrics = javaClass.getMethodsMetrics().get(entry.getKey());
+        if (metrics == null) {
+            metrics = new MethodMetrics();
+            javaClass.getMethodsMetrics().put(entry.getKey(), metrics);
+        } //viene creato l'oggetto MethodMetrics
+        if (!methodMap.containsKey(entry.getKey())) {
+            metrics.setBug(true); //se sparisce era buggy
+        } else { //se esiste ancora
+            String fixedBody = methodMap.get(entry.getKey());
+            String oldBody = entry.getValue();
+            if (!fixedBody.equals(oldBody)) { //confronta i corpi; se sono cambiati allora era buggy
+                metrics.setBug(true);
+            }
+        }
+    }
+
+    private @NotNull List<String> getTouchedClassesNames(@NotNull RevCommit commit) throws IOException {
+        List<String> touchedClassesNames = new ArrayList<>();
+        //lista inizialmente vuota in cui ci andranno le classi coinvolte per quel commit
+
+        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE);
+             ObjectReader reader = repository.newObjectReader()) {
+            CanonicalTreeParser newTreeIter = new CanonicalTreeParser();
+            ObjectId newTree = commit.getTree();
+            newTreeIter.reset(reader, newTree);
+            RevCommit commitParent = commit.getParent(0);
+            CanonicalTreeParser oldTreeIter = new CanonicalTreeParser();
+            ObjectId oldTree = commitParent.getTree();
+            oldTreeIter.reset(reader, oldTree);
+            diffFormatter.setRepository(repository);
+            //ogni DiffEntry rappresenta un file che è stato modificato
+            List<DiffEntry> entries = diffFormatter.scan(oldTreeIter, newTreeIter);
+            for (DiffEntry entry : entries) {
+                //controllo che sia un file.java; non un file di test
+                if (entry.getNewPath().contains(JAVA_EXTENTION) && !entry.getNewPath().contains("/test/")) {
+                    touchedClassesNames.add(entry.getNewPath());
+                }
+            }
+        } catch (ArrayIndexOutOfBoundsException ignored) {
+            // ignoring when no parent is found
+        }
+        return touchedClassesNames;
     }
 
     private void foundMostCodeSmells() {
@@ -221,13 +397,12 @@ public class PreProcessJavaClass {
                 .filter(entry -> (entry.getValue().getStatementCount() != 1) && entry.getValue().isBug())
                 .filter(entry -> entry.getValue().getNumberOfCodeSmells() == globalMax.get())
                 .forEach(entry -> {
-                    try {
-                        storeMaxCodeSmells(last.getId() + "smell-" + globalMax.get() + "-" + this.project + (num.incrementAndGet()), jc, entry);
-                    } catch (IOException e) {
-                        logError(e::getMessage);
-                    }
+                    storeMaxCodeSmells(last.getId() + "smell-" + globalMax.get() + "-" + this.project + (num.incrementAndGet()), jc, entry);
                     extractPreviousMethod(jc, entry, last, globalMax, num);
                 }));
+    }
+
+    private void storeMaxCodeSmells(String s, JavaClass jc, Map.Entry<String, MethodMetrics> entry) {
     }
 
     private void extractPreviousMethod(JavaClass jc, Map.Entry<String, MethodMetrics> entry, Release last, AtomicInteger globalMax, AtomicInteger num) {
@@ -243,26 +418,10 @@ public class PreProcessJavaClass {
             matchingPrevClassOpt.ifPresent(prevClass -> {
                 if (prevClass.getMethodsMetrics().containsKey(entry.getKey())) {
                     Map.Entry<String, MethodMetrics> prevEntry = Map.entry(entry.getKey(), prevClass.getMethodsMetrics().get(entry.getKey()));
-                    try {
-                        storeMaxCodeSmells(previousRelease.getId() + "-prev-smell-" + globalMax.get() + "-" + this.project + num.get(), prevClass, prevEntry);
-                    } catch (IOException e) {
-                        logError(e::getMessage);
-                    }
+                    storeMaxCodeSmells(previousRelease.getId() + "-prev-smell-" + globalMax.get() + "-" + this.project + num.get(), prevClass, prevEntry);
                 }
             });
         });
-    }
-
-    private void cutJavaClasses() {
-        double limitPercentage = 0.66;
-        int limit = (int) (this.javaClassPerRelease.size() * limitPercentage);
-        logInfo(() -> "LIMIT: " + limit + " total releases size=" + this.javaClassPerRelease.size() +
-                " Java classes size=" + this.javaClasses.size());
-        this.javaClassPerRelease.entrySet().removeIf(entry -> entry.getKey().getId() > limit);
-        this.javaClasses.removeIf(javaClass -> javaClass.getRelease().getId() > limit);
-        logInfo(() -> "after cut releases releases size=" + this.javaClassPerRelease.size() +
-                " java cut-classes size=" + this.javaClasses.size());
-        this.logBugPercentage();
     }
 
     private void logBugPercentage() {
@@ -576,93 +735,6 @@ public class PreProcessJavaClass {
         }
     }
 
-    private void fillClassesInfo() throws IOException {
-        this.fillClassesInfo(this.tickets, this.javaClasses);
-    }
-
-    public void fillClassesInfo(List<Ticket> theTickets, @NotNull List<JavaClass> theClasses) throws IOException {
-        for (JavaClass javaClass : theClasses) javaClass.getMetrics().setBug(false);
-
-        for (Ticket ticket : theTickets) {
-            List<Commit> commitsContainingTicket = ticket.getCommitList();
-            Release injectedVersion = ticket.getInjectedVersion();
-            for (Commit commit : commitsContainingTicket) {
-                SimpleDateFormat formatter = new SimpleDateFormat(GitInjection.LOCAL_DATE_FORMAT);
-                RevCommit revCommit = commit.getRevCommit();
-                LocalDate commitDate = LocalDate.parse(formatter.format(Date.from(revCommit.getCommitterIdent().getWhenAsInstant())));
-                if (!commitDate.isAfter(ticket.getResolutionDate()) && !commitDate.isBefore(ticket.getCreationDate())) {
-                    List<String> modifiedClassesNames = getTouchedClassesNames(revCommit);
-                    //verifico le classi che sono state toccate in quel periodo temporale
-                    Release releaseOfCommit = commit.getRelease();
-                    modifiedClassesForCommit.putIfAbsent(revCommit, modifiedClassesNames);
-                    for (String modifiedClass : modifiedClassesNames) {
-                        checkForAnyBug(modifiedClass, injectedVersion, releaseOfCommit);
-                    }
-                }
-            }
-        }
-    }
-
-    private void checkForAnyBug(String modifiedClass, Release injectedVersion, Release fixedVersion) {
-        List<JavaClass> fixedClasses = this.javaClasses.stream().filter(javaClass -> javaClass.getRelease().getId() == fixedVersion.getId()).toList();
-
-        for (JavaClass javaClass : this.javaClasses) {
-            if (javaClass.getName().equals(modifiedClass)
-                    && javaClass.getRelease().getId() < fixedVersion.getId()
-                    && javaClass.getRelease().getId() >= injectedVersion.getId()) {
-                javaClass.getMetrics().setBug(true);
-                javaClass.getMethods().entrySet().forEach(entry ->
-                        fixedClasses.stream().filter(jc -> jc.getName().equals(modifiedClass)).findAny().ifPresent(
-                                fixedClass -> {
-                                    Map<String, String> methodMap = fixedClass.getMethods();
-                                    checkMethodDiff(javaClass, entry, methodMap);
-                                }
-                        ));
-            }
-        }
-    }
-
-    private static void checkMethodDiff(JavaClass javaClass, Map.Entry<String, String> entry, Map<String, String> methodMap) {
-        MethodMetrics metrics = javaClass.getMethodsMetrics().get(entry.getKey());
-        if (metrics == null) {
-            metrics = new MethodMetrics();
-            javaClass.getMethodsMetrics().put(entry.getKey(), metrics);
-        }
-        if (!methodMap.containsKey(entry.getKey())) {
-            metrics.setBug(true);
-        } else {
-            String fixedBody = methodMap.get(entry.getKey());
-            String oldBody = entry.getValue();
-            if (!fixedBody.equals(oldBody)) {
-                metrics.setBug(true);
-            }
-        }
-    }
-
-    private @NotNull List<String> getTouchedClassesNames(@NotNull RevCommit commit) throws IOException {
-        List<String> touchedClassesNames = new ArrayList<>();
-        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE);
-             ObjectReader reader = repository.newObjectReader()) {
-            CanonicalTreeParser newTreeIter = new CanonicalTreeParser();
-            ObjectId newTree = commit.getTree();
-            newTreeIter.reset(reader, newTree);
-            RevCommit commitParent = commit.getParent(0);
-            CanonicalTreeParser oldTreeIter = new CanonicalTreeParser();
-            ObjectId oldTree = commitParent.getTree();
-            oldTreeIter.reset(reader, oldTree);
-            diffFormatter.setRepository(repository);
-            List<DiffEntry> entries = diffFormatter.scan(oldTreeIter, newTreeIter);
-            for (DiffEntry entry : entries) {
-                if (entry.getNewPath().contains(JAVA_EXTENTION) && !entry.getNewPath().contains("/test/")) {
-                    touchedClassesNames.add(entry.getNewPath());
-                }
-            }
-        } catch (ArrayIndexOutOfBoundsException ignored) {
-            // ignoring when no parent is found
-        }
-        return touchedClassesNames;
-    }
-
     public List<Commit> getCommitsWithIssues() {
         return commitsWithIssues;
     }
@@ -764,5 +836,27 @@ public class PreProcessJavaClass {
         } catch (GitAPIException e) {
             logError(() -> "reset the repo: " + e.getMessage());
         }
+    }
+
+    public void setLastBranch(String lastBranch) {
+        this.lastBranch = lastBranch;
+    }
+
+    // --- logging lazy helpers (Sonar-friendly) ---
+    private void logInfo(Supplier<String> msgSupplier) {
+        if (logger.isLoggable(Level.INFO)) logger.info(msgSupplier.get());
+    }
+    private void logWarning(Supplier<String> msgSupplier) {
+        if (logger.isLoggable(Level.WARNING)) logger.warning(msgSupplier.get());
+    }
+    private void logError(Supplier<String> msgSupplier) {
+        if (logger.isLoggable(Level.SEVERE)) logger.severe(msgSupplier.get());
+    }
+    private void logTime(String name, Runnable action) {
+        logInfo(() -> "start " + name);
+        long start = System.currentTimeMillis();
+        action.run();
+        long end = System.currentTimeMillis();
+        logInfo(() -> "done " + name + " took=" + ((end - start) / 1e3) + "s");
     }
 }

@@ -19,12 +19,18 @@ import java.util.stream.Collectors;
 
 public class Sink {
 
-    public static final String DELIVERY_OUTPUT = "deliveryOutput";
-    private static final String INJECTION_PATH = DELIVERY_OUTPUT + File.separator + "injection" + File.separator;
-    private static final String DATASET_PATH = DELIVERY_OUTPUT + File.separator + "datasets" + File.separator;
-    private static final String RESULT_PATH = DELIVERY_OUTPUT + File.separator + "results" + File.separator;
+    // Cartella base assoluta per tutti gli output
+    public static final String BASE_OUTPUT_PATH =
+            "/Users/gaiameola/Desktop/ISPW/Progetto_ISW2/deliveryOutput" + File.separator;
+
+    // Sottocartelle principali
+    private static final String INJECTION_PATH = BASE_OUTPUT_PATH + "injection" + File.separator;
+    private static final String DATASET_PATH   = BASE_OUTPUT_PATH + "datasets" + File.separator;
+    private static final String RESULT_PATH    = BASE_OUTPUT_PATH + "results" + File.separator;
+
     private static final String METHOD = "method";
 
+    // Header CSV invariati
     private static final String CSV_HEADERS_INPUTS = "RELEASE_ID," +
             "FILE_NAME," +
             "SIZE," +
@@ -57,28 +63,34 @@ public class Sink {
 
     private static final String ARFF_RELATION = "@relation ";
     private static final String ARFF_ATTRIBUTE_AND_DATA = """
-            @attribute SIZE numeric
-            @attribute LOC_ADDED numeric
-            @attribute LOC_ADDED_AVG numeric
-            @attribute LOC_ADDED_MAX numeric
-            @attribute LOC_REMOVED numeric
-            @attribute LOC_REMOVED_AVG numeric
-            @attribute LOC_REMOVED_MAX numeric
-            @attribute CHURN numeric
-            @attribute CHURN_AVG numeric
-            @attribute CHURN_MAX numeric
-            @attribute LOC_TOUCHED numeric
-            @attribute LOC_TOUCHED_AVG numeric
-            @attribute LOC_TOUCHED_MAX numeric
-            @attribute NUMBER_OF_REVISIONS numeric
-            @attribute NUMBER_OF_DEFECT_FIXES numeric
-            @attribute NUMBER_OF_AUTHORS numeric
-            @attribute IS_BUGGY {'YES', 'NO'}
-            
-            @data
-            """;
+        @attribute SIZE numeric
+        @attribute LOC_ADDED numeric
+        @attribute LOC_ADDED_AVG numeric
+        @attribute LOC_ADDED_MAX numeric
+        @attribute LOC_REMOVED numeric
+        @attribute LOC_REMOVED_AVG numeric
+        @attribute LOC_REMOVED_MAX numeric
+        @attribute CHURN numeric
+        @attribute CHURN_AVG numeric
+        @attribute CHURN_MAX numeric
+        @attribute LOC_TOUCHED numeric
+        @attribute LOC_TOUCHED_AVG numeric
+        @attribute LOC_TOUCHED_MAX numeric
+        @attribute NUMBER_OF_REVISIONS numeric
+        @attribute NUMBER_OF_DEFECT_FIXES numeric
+        @attribute NUMBER_OF_AUTHORS numeric
+        @attribute IS_BUGGY {'YES', 'NO'}
+        
+        @data
+        """;
 
+    // Costruttore privato per impedire istanziazione
     private Sink() {
+    }
+
+    // Metodo centralizzato per costruire il path di un progetto in una categoria
+    public static String buildProjectPath(String category, String projectName) {
+        return BASE_OUTPUT_PATH + category + File.separator + projectName + File.separator;
     }
 
     private static int compareJsonMap(String o1, String o2) {
@@ -99,7 +111,8 @@ public class Sink {
 
     public static void serializeTicketsAndCommits(String projectName, String filename,
                                                   List<Ticket> tickets, FileExtension fe) throws IOException {
-        final String datasetPath = DATASET_PATH + "tickets_commits" + File.separator + projectName;
+        // Usa il metodo centralizzato per costruire il path
+        final String datasetPath = buildProjectPath("tickets_commits", projectName);
         File folder = new File(datasetPath);
 
         if (!folder.exists() && !folder.mkdirs()) {
@@ -187,7 +200,8 @@ public class Sink {
     }
 
     public static void serializeProjectAsCsv(@NotNull GitInjection gitInjection) throws IOException {
-        String dirPath = DATASET_PATH + File.separator + METHOD + File.separator;
+        // Usa il metodo centralizzato per costruire il path
+        String dirPath = buildProjectPath("datasets" + File.separator + METHOD, gitInjection.getProject());
         File directory = new File(dirPath);
         if (!directory.exists() && !directory.mkdirs()) {
             throw new IOException("Unable to create directory: " + dirPath);
@@ -198,7 +212,8 @@ public class Sink {
 
             writer.write(MethodHeaders.getCsvHeaders() + "\n");
 
-            gitInjection.getJavaClassPerRelease().keySet().stream().sorted(Comparator.comparing(Release::getId))
+            gitInjection.getJavaClassPerRelease().keySet().stream()
+                    .sorted(Comparator.comparing(Release::getId))
                     .forEach(release -> gitInjection.getJavaClassPerRelease().get(release).forEach(javaClass -> {
                         StringBuilder builder = new StringBuilder();
                         javaClass.getMethodsMetrics().forEach((s, me) -> builder.append(release.getId()).append(';')
@@ -234,9 +249,10 @@ public class Sink {
                                                List<Release> releases, List<JavaClass> javaClasses,
                                                DataSetType dataSetType) {
 
-        final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
-                FileExtension.CSV.name().toLowerCase(Locale.getDefault()) + File.separator +
-                dataSetType.toString().toLowerCase(Locale.getDefault());
+        // Percorso centralizzato: /deliveryOutput/classes/<projectName>/csv/<datasetType>/
+        final String datasetPath = buildProjectPath("classes", projectName)
+                + FileExtension.CSV.name().toLowerCase(Locale.getDefault()) + File.separator
+                + dataSetType.toString().toLowerCase(Locale.getDefault());
 
         try {
             File file = getFile(filename, FileExtension.CSV, datasetPath);
@@ -253,9 +269,10 @@ public class Sink {
                                                 List<Release> releases, List<JavaClass> javaClasses,
                                                 @NotNull DataSetType dataSetType) {
 
-        final String datasetPath = DATASET_PATH + CLASSES + File.separator + projectName + File.separator +
-                FileExtension.ARFF.name().toLowerCase(Locale.getDefault()) + File.separator +
-                dataSetType.toString().toLowerCase(Locale.getDefault());
+        // Percorso centralizzato: /deliveryOutput/classes/<projectName>/arff/<datasetType>/
+        final String datasetPath = buildProjectPath("classes", projectName)
+                + FileExtension.ARFF.name().toLowerCase(Locale.getDefault()) + File.separator
+                + dataSetType.toString().toLowerCase(Locale.getDefault());
 
         try {
             File file = getFile(filename, FileExtension.ARFF, datasetPath);
@@ -273,7 +290,8 @@ public class Sink {
     }
 
     public static void serializeResultsToCsv(@NotNull String projectName, List<ClassifierResult> results) {
-        final String resultsPath = Sink.RESULT_PATH + projectName + File.separator;
+        // Usa il metodo centralizzato per costruire il path
+        final String resultsPath = buildProjectPath("results", projectName);
         final String filename = projectName.toLowerCase(Locale.getDefault()) + "_report";
         try {
             File file = getFile(filename, FileExtension.CSV, resultsPath);
@@ -374,7 +392,8 @@ public class Sink {
     }
 
     private static void sinkJson(String projectName, String filename, JSONObject data, FileExtension fe) {
-        final String projectPath = INJECTION_PATH + projectName;
+        // Usa il metodo centralizzato per costruire il path
+        final String projectPath = buildProjectPath("injection", projectName);
         try {
             File file = getFile(filename, fe, projectPath);
             try (FileWriter fileWriter = new FileWriter(file)) {
@@ -390,9 +409,10 @@ public class Sink {
     }
 
 
-    public static void storeMaxCodeSmells(String fileName, JavaClass jc, Map.Entry<String, MethodMetrics> entry) throws IOException {
-        // Creo un file per salvare info
-        Path path = Paths.get("max_code_smells/" + fileName + ".txt");
+    public static void storeMaxCodeSmells(String projectName, String fileName, JavaClass jc,
+                                          Map.Entry<String, MethodMetrics> entry) throws IOException {
+        // Percorso centralizzato: /deliveryOutput/max_code_smells/<projectName>/<fileName>.txt
+        Path path = Paths.get(buildProjectPath("max_code_smells", projectName) + fileName + ".txt");
         Files.createDirectories(path.getParent());
 
         String content = "Class: " + jc.getName() + "\n"
@@ -410,4 +430,31 @@ public class Sink {
         }
         return new File(path + File.separator + filename + "." + fe.name().toLowerCase(Locale.getDefault()));
     }
+
+
+    /**
+     * Aggiunge una riga alla tabella con le informazioni sulle classi buggy/non buggy.
+     */
+    public static void addBuggyClass(String projectName, JSONArray array, JavaClass jc) {
+        JSONObject entry = new JSONObject();
+        entry.put("project", projectName);
+        entry.put("release", jc.getRelease().getReleaseName());
+        entry.put("class", jc.getClassName());
+        entry.put("buggy", jc.getMetrics().isBug());
+        array.put(entry);
+    }
+
+    /**
+     * Salva il report JSON su file nella cartella centralizzata.
+     */
+    public static void saveBuggyClassesReport(String projectName, String fileName, JSONArray array) {
+        // Percorso: /deliveryOutput/buggy_classes/<projectName>/<fileName>.json
+        String reportPath = buildProjectPath("buggy_classes", projectName) + fileName + ".json";
+        try (FileWriter file = new FileWriter(reportPath)) {
+            file.write(array.toString(4));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
 }

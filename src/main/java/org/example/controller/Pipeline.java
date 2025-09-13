@@ -1,11 +1,13 @@
 package org.example.controller;
 
 import org.example.logging.SeLogger;
+import org.example.model.JavaClass;
 import org.example.model.Release;
 import org.example.model.Ticket;
 import org.example.utilities.Sink;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
@@ -24,7 +26,7 @@ public class Pipeline implements Runnable {
     private final CountDownLatch latch;
     private final String threadIdentity;
 
-    public Pipeline(int threadId, CountDownLatch countDownLatch, @NotNull String projectName, String projectUrl){
+    public Pipeline(int threadId, CountDownLatch countDownLatch, @NotNull String projectName, String projectUrl) {
         this.targetName = projectName.toUpperCase();
         this.targetUrl = projectUrl;
         this.logger = SeLogger.getInstance().getLogger();
@@ -36,91 +38,76 @@ public class Pipeline implements Runnable {
         logInfo(() -> "Starting processing project");
 
         if (targetName == null || targetName.isBlank()) {
-            logSevere(() -> "targetName è null o vuoto!");
+            logSevere(() -> "targetName è null o vuoto! url=" + targetUrl);
             return;
         }
         if (targetUrl == null || targetUrl.isBlank()) {
-            logSevere(() -> "targetUrl è null o vuoto!");
+            logSevere(() -> "targetUrl è null o vuoto! name=" + targetName);
             return;
         }
 
         long overallStart = System.nanoTime();
-        final String seconds = " seconds";
 
         try {
             // Jira Injection
             JiraInjection jiraInjection = new JiraInjection(this.targetName);
             measureExecutionChecked("Releases injection", jiraInjection::injectReleases);
+            logInfo(() -> ">>> Dopo injectReleases");
+
             List<Release> releases = measureExecutionWithResultChecked(jiraInjection::getReleases);
+            logInfo(() -> ">>> Dopo getReleases");
 
-            // Git Injection
-            GitInjection gitInjection = new GitInjection(this.targetName, this.targetUrl, releases);
-            measureExecutionChecked("Commits injection", gitInjection::injectCommits);
+            try (GitInjection gitInjection = new GitInjection(this.targetName, this.targetUrl, releases)) {
+                measureExecutionChecked("Commits injection", gitInjection::injectCommits);
+                logInfo(() -> ">>> Dopo injectCommits");
 
-//            // Tickets Injection & preprocessing
-            measureExecutionChecked("Tickets injection and commit preprocessing", () -> {
-                jiraInjection.injectTickets();
-                gitInjection.setTickets(jiraInjection.getFixedTickets());
-                gitInjection.preprocessCommitsWithIssue();
-            });
+                // Tickets Injection & preprocessing
+                measureExecutionChecked("Tickets injection and commit preprocessing", () -> {
+                    jiraInjection.injectTickets();
+                    gitInjection.setTickets(jiraInjection.getFixedTickets());
+                    gitInjection.preprocessCommitsWithIssue();
+                });
+                logInfo(() -> ">>> Dopo injectTickets/preprocessCommitsWithIssue");
 
+                // Java Class Injection
+                measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
+                logInfo(() -> ">>> Dopo preprocessJavaClasses");
 
-            // forse da aggiungere: confronto tra i vari proportion calcolati
+                // Log conteggi prima di salvare
+                logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
+                logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
+                logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
+                logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
+                logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
 
-                        // Java Class Injection
-                        measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
-            //            gitInjection.closeRepo();
-            //
-            //            // Export tickets and commits
-            //            exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON);
-            //            exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.CSV);
-            //
-            //
-            //
-            //            // Preprocessing Project
-            //            PreprocessMetrics preprocessMetrics = new PreprocessMetrics(gitInjection);
-            //            measureExecutionChecked("Preprocessing project", () -> {
-            //                Sink.serializeProjectAsCsv(gitInjection);
-            //                preprocessMetrics.start();
-            //                storeCurrentData(jiraInjection, gitInjection);
-            //            });
-            //
-            //            // Dataset Generation
-            //            measureExecutionChecked("Dataset generation", () -> preprocessMetrics.generateDataset(targetName));
-            //
-            //            // **Weka Classification Phase**
-            //            measureExecutionChecked("Weka classification", () -> {
-            //                WekaProcessing wekaProcessing = new WekaProcessing(this.targetName,
-            //                        jiraInjection.getReleases().size() / 2);
-            //                wekaProcessing.classify();
-            //                wekaProcessing.sinkResults();
-            //            });
+                // Salvataggio dati base (injection)
+                logInfo(() -> ">>> Inizio salvataggio dati injection");
+                storeCurrentData(jiraInjection, gitInjection);
+                logInfo(() -> ">>> Fine salvataggio dati injection");
+
+                // Export tickets_commits
+                logInfo(() -> ">>> Inizio export tickets_commits");
+                exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON);
+                logInfo(() -> ">>> Fine export tickets_commits");
+            }
 
         } catch (Exception e) {
             logSevere(() -> "Error: " + e.getMessage() + " (" + e.getClass().getSimpleName() + ")");
-            // se vuoi la trace completa in log dettagliati: logger.log(Level.FINEST, "stacktrace", e);
+            if (logger.isLoggable(Level.FINEST)) {
+                logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
+            }
         } finally {
-            long overallEnd = System.nanoTime();
-            logInfo(() -> "Total processing took: " + getTimeInSeconds(overallStart, overallEnd) + seconds);
-            // ATTENZIONE: il countDown lo facciamo in run() (non qui) per evitare doppio decremento
+            logInfo(() -> "Total processing took: " + getTimeInSeconds(overallStart, System.nanoTime()) + " seconds");
         }
     }
 
-    // prefisso comune inserito nei messaggi per chiarezza in multi-thread
     private String logPrefix() {
         return String.format("[%s][%s] ", threadIdentity, targetName);
     }
 
-    // Sonar-friendly lazy logging helpers
     private void logInfo(Supplier<String> msgSupplier) {
         if (logger.isLoggable(Level.INFO)) {
             logger.info(logPrefix() + msgSupplier.get());
-        }
-    }
-
-    private void logWarning(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.WARNING)) {
-            logger.warning(logPrefix() + msgSupplier.get());
         }
     }
 
@@ -130,31 +117,21 @@ public class Pipeline implements Runnable {
         }
     }
 
-    /**
-     * Misura il tempo di esecuzione di un Runnable che può lanciare checked exceptions
-     */
     private void measureExecutionChecked(String taskName, CheckedRunnable task) throws Exception {
         long start = System.nanoTime();
         logInfo(() -> "Start " + taskName);
         task.run();
-        long end = System.nanoTime();
-        logInfo(() -> taskName + " took: " + getTimeInSeconds(start, end) + " seconds");
+        logInfo(() -> taskName + " took: " + getTimeInSeconds(start, System.nanoTime()) + " seconds");
     }
 
-    /**
-     * Misura il tempo di esecuzione di un Supplier con checked exception
-     */
     private <T> T measureExecutionWithResultChecked(CheckedSupplier<T> supplier) throws Exception {
         long start = System.nanoTime();
+        logInfo(() -> "Start " + "Get releases");
         T result = supplier.get();
-        long end = System.nanoTime();
-        logInfo(() -> "Execution took: " + getTimeInSeconds(start, end) + " seconds");
+        logInfo(() -> "Get releases" + " took: " + getTimeInSeconds(start, System.nanoTime()) + " seconds");
         return result;
     }
 
-    /**
-     * Functional interfaces per lambda con checked exceptions
-     */
     @FunctionalInterface
     private interface CheckedRunnable {
         void run() throws Exception;
@@ -165,22 +142,16 @@ public class Pipeline implements Runnable {
         T get() throws Exception;
     }
 
-    // Helper method to convert nanoseconds to seconds
     @Contract(pure = true)
     private @NotNull String getTimeInSeconds(long start, long end) {
         return String.format("%.2f", (end - start) / 1_000_000_000.0);
     }
 
     private void storeCurrentData(@NotNull JiraInjection jiraInjection, @NotNull GitInjection gitInjection) {
-
-        Sink.serializeToJson(this.targetName, "Releases", new JSONObject(jiraInjection.getMapReleases()),
-                Sink.FileExtension.JSON);
-        Sink.serializeToJson(this.targetName, "Tickets",  new JSONObject(gitInjection.getMapTickets()),
-                Sink.FileExtension.JSON);
-        Sink.serializeToJson(this.targetName, "Commits", new JSONObject(gitInjection.getMapCommits()),
-                Sink.FileExtension.JSON);
-        Sink.serializeToJson(this.targetName, "Summary", new JSONObject(gitInjection.getMapSummary()),
-                Sink.FileExtension.JSON);
+        Sink.serializeToJson(this.targetName, "Releases", new JSONObject(jiraInjection.getMapReleases()), Sink.FileExtension.JSON);
+        Sink.serializeToJson(this.targetName, "Tickets", new JSONObject(gitInjection.getMapTickets()), Sink.FileExtension.JSON);
+        Sink.serializeToJson(this.targetName, "Commits", new JSONObject(gitInjection.getMapCommits()), Sink.FileExtension.JSON);
+        Sink.serializeToJson(this.targetName, "Summary", new JSONObject(gitInjection.getMapSummary()), Sink.FileExtension.JSON);
     }
 
     public void exportTicketsAndCommits(String projectName, List<Ticket> tickets, Sink.FileExtension fe) {
@@ -195,15 +166,17 @@ public class Pipeline implements Runnable {
     @Override
     public void run() {
         long startTime = System.nanoTime();
+        String oldName = Thread.currentThread().getName();
+        Thread.currentThread().setName(threadIdentity);
 
         try {
             this.injectAndProcess();
         } finally {
             long endTime = System.nanoTime();
             double elapsedSeconds = (endTime - startTime) / 1_000_000_000.0;
-            // Sonar-friendly
             logger.info(() -> String.format("%s Elapsed Time: %.3f seconds", logPrefix(), elapsedSeconds));
             latch.countDown();
+            Thread.currentThread().setName(oldName);
         }
     }
 }

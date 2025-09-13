@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
 /**
  * Class controller responsible to link Jira-Ticket with GitHub commits and fill all the metadata
  */
-public class GitInjection {
+public class GitInjection implements AutoCloseable {
 
     public static final String LOCAL_DATE_FORMAT = "yyyy-MM-dd";
     private static final String TEMP = ".temp" + File.separator;
@@ -208,14 +208,6 @@ public class GitInjection {
             this.tickets.removeIf(ticket -> ticket.getCommitList() == null || ticket.getCommitList().isEmpty());
         }
         logInfo(() -> "preprocessCommitsWithIssue finished: commitsWithIssues=" + this.commitsWithIssues.size());
-    }
-
-    public void closeRepo() {
-        try {
-            this.localGithub.getRepository().close();
-        } catch (Exception e) {
-            logWarning(() -> "Error closing repository: " + e.getMessage());
-        }
     }
 
     /**
@@ -467,5 +459,23 @@ public class GitInjection {
         }
 
         return result;
+    }
+
+    @Override
+    public void close() {
+        closeRepo();
+    }
+
+    public void closeRepo() {
+        try {
+            if (localGithub != null) {
+                localGithub.close();
+            }
+            if (repository != null) {
+                repository.close();
+            }
+        } catch (Exception e) {
+            logWarning(() -> "Error closing repository: " + e.getMessage());
+        }
     }
 }
