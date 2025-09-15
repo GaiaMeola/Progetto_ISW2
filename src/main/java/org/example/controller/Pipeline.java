@@ -17,7 +17,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class Pipeline implements Runnable {
-//implementazione di Runnable così da poter essere passata a Executor Service
 
     private final String targetName;
     private final String targetUrl;
@@ -48,17 +47,16 @@ public class Pipeline implements Runnable {
         long overallStart = System.nanoTime();
 
         try {
-            // Jira Injection
+            // Jira Injection --> popolamento delle release di un progetto
             JiraInjection jiraInjection = new JiraInjection(this.targetName);
             measureExecutionChecked("Releases injection", jiraInjection::injectReleases);
-            logInfo(() -> ">>> Dopo injectReleases");
 
+            //recupero della lista di release di un progetto
             List<Release> releases = measureExecutionWithResultChecked(jiraInjection::getReleases);
-            logInfo(() -> ">>> Dopo getReleases");
 
             try (GitInjection gitInjection = new GitInjection(this.targetName, this.targetUrl, releases)) {
+                // Commits injection --> popolamento dei commits di un progetto
                 measureExecutionChecked("Commits injection", gitInjection::injectCommits);
-                logInfo(() -> ">>> Dopo injectCommits");
 
                 // Tickets Injection & preprocessing
                 measureExecutionChecked("Tickets injection and commit preprocessing", () -> {
@@ -66,35 +64,53 @@ public class Pipeline implements Runnable {
                     gitInjection.setTickets(jiraInjection.getFixedTickets());
                     gitInjection.preprocessCommitsWithIssue();
                 });
-                logInfo(() -> ">>> Dopo injectTickets/preprocessCommitsWithIssue");
 
                 // Java Class Injection
                 measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
-                logInfo(() -> ">>> Dopo preprocessJavaClasses");
 
-                // Log conteggi prima di salvare
+                // Log conteggi
                 logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
                 logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
                 logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
                 logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
                 logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
 
-                // Salvataggio dati base (injection)
-                logInfo(() -> ">>> Inizio salvataggio dati injection");
-                storeCurrentData(jiraInjection, gitInjection);
-                logInfo(() -> ">>> Fine salvataggio dati injection");
+                // Salvataggio dati base
+                measureExecutionChecked("Store injection data", () -> storeCurrentData(jiraInjection, gitInjection));
 
                 // Export tickets_commits
-                logInfo(() -> ">>> Inizio export tickets_commits");
-                exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON);
-                logInfo(() -> ">>> Fine export tickets_commits");
+                measureExecutionChecked("Export tickets_commits", () ->
+                        exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON));
+
+//                // 🔹 Preprocessing Project
+//                measureExecutionChecked("Preprocessing project", () -> {
+//                    Sink.serializeProjectAsCsv(gitInjection);
+//                    PreprocessMetrics preprocessMetrics = new PreprocessMetrics(gitInjection);
+//                    preprocessMetrics.start();
+//                    storeCurrentData(jiraInjection, gitInjection);
+//                    preprocessMetrics.generateDataset(targetName);
+//
+//                    // 🔹 Classification Phase
+//                    WekaProcessing = new WekaProcessing(this.targetName,
+//                            jiraInjection.getReleases().size() / 2);
+//                    wekaProcessing.classify();
+//                    wekaProcessing.sinkResults();
+//                });
             }
 
+        } catch (IOException e) {
+            logSevere(() -> "I/O error in pipeline: " + e.getMessage());
+            throw new RuntimeException("Pipeline I/O failed for project " + targetName, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logSevere(() -> "Pipeline interrupted: " + e.getMessage());
+            throw new RuntimeException("Pipeline interrupted for project " + targetName, e);
+        } catch (RuntimeException e) {
+            logSevere(() -> "Runtime error in pipeline: " + e.getMessage());
+            throw e;
         } catch (Exception e) {
-            logSevere(() -> "Error: " + e.getMessage() + " (" + e.getClass().getSimpleName() + ")");
-            if (logger.isLoggable(Level.FINEST)) {
-                logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
-            }
+            logSevere(() -> "Unexpected error in pipeline: " + e.getMessage());
+            throw new RuntimeException("Pipeline failed for project " + targetName, e);
         } finally {
             logInfo(() -> "Total processing took: " + getTimeInSeconds(overallStart, System.nanoTime()) + " seconds");
         }
@@ -116,28 +132,15 @@ public class Pipeline implements Runnable {
         }
     }
 
-    private void measureExecutionChecked(String taskName, CheckedRunnable task) {
+    private void measureExecutionChecked(String taskName, CheckedRunnable task) throws Exception {
         long start = System.nanoTime();
         logInfo(() -> "Start " + taskName);
         try {
             task.run();
-        } catch (IOException e) {
-            logSevere(() -> "I/O error during task '" + taskName + "' for target " + targetName + ": " + e.getMessage());
-            if (logger.isLoggable(Level.FINEST)) logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
-            throw new RuntimeException("I/O task failed: " + taskName + " for target " + targetName, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            logSevere(() -> "Task '" + taskName + "' interrupted for target " + targetName + ": " + e.getMessage());
-            throw new RuntimeException("Interrupted task: " + taskName + " for target " + targetName, e);
-        } catch (RuntimeException e) {
-            logSevere(() -> "Runtime error during task '" + taskName + "' for target " + targetName + ": " + e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } finally {
+            logInfo(() -> taskName + " took: " + getTimeInSeconds(start, System.nanoTime()) + " seconds");
         }
-        logInfo(() -> taskName + " took: " + getTimeInSeconds(start, System.nanoTime()) + " seconds");
     }
-
 
     private <T> T measureExecutionWithResultChecked(CheckedSupplier<T> supplier) throws Exception {
         long start = System.nanoTime();
@@ -169,20 +172,9 @@ public class Pipeline implements Runnable {
         Sink.serializeToJson(this.targetName, "Summary", new JSONObject(gitInjection.getMapSummary()), Sink.FileExtension.JSON);
     }
 
-    public void exportTicketsAndCommits(String projectName, List<Ticket> tickets, Sink.FileExtension fe) {
+    public void exportTicketsAndCommits(String projectName, List<Ticket> tickets, Sink.FileExtension fe) throws IOException {
         String filename = projectName.toLowerCase(Locale.getDefault()) + "_tickets_commits";
-        try {
-            Sink.serializeTicketsAndCommits(projectName, filename, tickets, fe);
-        } catch (IOException e) {
-            String message = String.format("[%s][%s] Failed to export tickets and commits: %s", threadIdentity, projectName, e.getMessage());
-            logger.severe(message);
-            if (logger.isLoggable(Level.FINEST)) {
-                logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
-            }
-            throw new RuntimeException(
-                    String.format("Error exporting tickets and commits for project '%s' [%s]", projectName, threadIdentity), e
-            );
-        }
+        Sink.serializeTicketsAndCommits(projectName, filename, tickets, fe);
     }
 
     @Override
