@@ -1,13 +1,11 @@
 package org.example.controller;
 
 import org.example.logging.SeLogger;
-import org.example.model.JavaClass;
 import org.example.model.Release;
 import org.example.model.Ticket;
 import org.example.utilities.Sink;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
@@ -19,6 +17,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class Pipeline implements Runnable {
+//implementazione di Runnable così da poter essere passata a Executor Service
 
     private final String targetName;
     private final String targetUrl;
@@ -117,12 +116,28 @@ public class Pipeline implements Runnable {
         }
     }
 
-    private void measureExecutionChecked(String taskName, CheckedRunnable task) throws Exception {
+    private void measureExecutionChecked(String taskName, CheckedRunnable task) {
         long start = System.nanoTime();
         logInfo(() -> "Start " + taskName);
-        task.run();
+        try {
+            task.run();
+        } catch (IOException e) {
+            logSevere(() -> "I/O error during task '" + taskName + "' for target " + targetName + ": " + e.getMessage());
+            if (logger.isLoggable(Level.FINEST)) logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
+            throw new RuntimeException("I/O task failed: " + taskName + " for target " + targetName, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logSevere(() -> "Task '" + taskName + "' interrupted for target " + targetName + ": " + e.getMessage());
+            throw new RuntimeException("Interrupted task: " + taskName + " for target " + targetName, e);
+        } catch (RuntimeException e) {
+            logSevere(() -> "Runtime error during task '" + taskName + "' for target " + targetName + ": " + e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
         logInfo(() -> taskName + " took: " + getTimeInSeconds(start, System.nanoTime()) + " seconds");
     }
+
 
     private <T> T measureExecutionWithResultChecked(CheckedSupplier<T> supplier) throws Exception {
         long start = System.nanoTime();
@@ -159,7 +174,14 @@ public class Pipeline implements Runnable {
         try {
             Sink.serializeTicketsAndCommits(projectName, filename, tickets, fe);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            String message = String.format("[%s][%s] Failed to export tickets and commits: %s", threadIdentity, projectName, e.getMessage());
+            logger.severe(message);
+            if (logger.isLoggable(Level.FINEST)) {
+                logger.log(Level.FINEST, logPrefix() + "Stacktrace:", e);
+            }
+            throw new RuntimeException(
+                    String.format("Error exporting tickets and commits for project '%s' [%s]", projectName, threadIdentity), e
+            );
         }
     }
 
