@@ -65,22 +65,22 @@ public class Pipeline implements Runnable {
                     gitInjection.preprocessCommitsWithIssue();
                 });
 
-                // Java Class Injection
-                measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
+//                // Java Class Injection
+//                measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
+//
+//                // Log conteggi
+//                logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
+//                logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
+//                logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
+//                logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
+//                logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
+//
+//                // Salvataggio dati base
+//                measureExecutionChecked("Store injection data", () -> storeCurrentData(jiraInjection, gitInjection));
 
-                // Log conteggi
-                logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
-                logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
-                logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
-                logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
-                logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
-
-                // Salvataggio dati base
-                measureExecutionChecked("Store injection data", () -> storeCurrentData(jiraInjection, gitInjection));
-
-                // Export tickets_commits
-                measureExecutionChecked("Export tickets_commits", () ->
-                        exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON));
+//                // Export tickets_commits
+//                measureExecutionChecked("Export tickets_commits", () ->
+//                        exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON));
 
 //                // 🔹 Preprocessing Project
 //                measureExecutionChecked("Preprocessing project", () -> {
@@ -165,6 +165,7 @@ public class Pipeline implements Runnable {
         return String.format("%.2f", (end - start) / 1_000_000_000.0);
     }
 
+    //per centralizzare i dati finali
     private void storeCurrentData(@NotNull JiraInjection jiraInjection, @NotNull GitInjection gitInjection) {
         Sink.serializeToJson(this.targetName, "Releases", new JSONObject(jiraInjection.getMapReleases()), Sink.FileExtension.JSON);
         Sink.serializeToJson(this.targetName, "Tickets", new JSONObject(gitInjection.getMapTickets()), Sink.FileExtension.JSON);

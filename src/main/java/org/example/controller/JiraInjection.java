@@ -16,6 +16,7 @@ import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -45,10 +46,29 @@ public class JiraInjection {
         assignIdsAndSort(releases);
     }
 
-    //metodo per recuperare i ticket da Jira
+    /**
+     * Scarica i ticket da JIRA, salva raw/filtered/proportion come JSON e lascia i risultati in memoria.
+     */
     public void injectTickets() throws IOException, URISyntaxException {
+        // 1) scarica da JIRA
         this.pullIssues();
+
+        // 2) salva i raw (tutti i ticket scaricati)
+        Sink.serializeToJson(this.projName, "TicketsRaw",
+                new JSONObject(Map.of("tickets", ticketsToJsonArray(this.ticketsWithIssues))),
+                Sink.FileExtension.JSON);
+
+        // 3) filtro "normale" e salvo
+        this.filterFixedNormally();
+        Sink.serializeToJson(this.projName, "TicketsFilteredNormally",
+                new JSONObject(Map.of("tickets", ticketsToJsonArray(this.fixedTickets))),
+                Sink.FileExtension.JSON);
+
+        // 4) applico proportion e salvo il risultato finale
         this.filterFixedApplyingProportion();
+        Sink.serializeToJson(this.projName, "TicketsWithProportion",
+                new JSONObject(Map.of("tickets", ticketsToJsonArray(this.fixedTickets))),
+                Sink.FileExtension.JSON);
     }
 
     //soltanto ticket corretti
@@ -122,10 +142,6 @@ public class JiraInjection {
         return WebJsonReader.readJsonFromUrl(url);
     }
 
-    /**
-     * Costruisce un oggetto Ticket valido a partire dal JSON di Jira.
-     * Ritorna null se il ticket è malformato o incoerente.
-     */
     @Nullable
     private Ticket buildTicket(JSONObject issue) {
         Logger logger = SeLogger.getInstance().getLogger();
@@ -138,16 +154,36 @@ public class JiraInjection {
 
             Release openingVersion = getReleaseAfterOrEqualDate(creationDate, this.releases);
             Release fixedVersion = getReleaseAfterOrEqualDate(resolutionDate, this.releases);
+
+            if (openingVersion == null || fixedVersion == null) {
+                if (logger.isLoggable(Level.WARNING)) {
+                    logger.warning(() -> String.format("Ticket %s scartato: OV o FV null", issue.optString("key")));
+                }
+                return null; // scarta ticket senza OV o FV
+            }
+
+            // Estrae AV coerenti con le release del progetto
             List<Release> affectedReleases = extractValidAffectedReleases(affectedVersionsArray);
 
-            if (!isTicketValid(openingVersion, fixedVersion, affectedReleases)) {
-                if (logger.isLoggable(Level.WARNING)) {
-                    logger.warning(() -> String.format(
-                            "Ticket %s scartato: incoerente o malformato",
-                            issue.optString("key")
-                    ));
+            // Controllo di consistenza AV vs OV
+            if (!affectedReleases.isEmpty()) {
+                Release oldestAV = affectedReleases.getFirst();
+                if (!oldestAV.getReleaseDate().isAfter(openingVersion.getReleaseDate())) {
+                    // AV coerente
+                    affectedReleases.sort(Comparator.comparing(Release::getReleaseDate));
+                } else {
+                    // AV incoerente, fallback a OV
+                    if (logger.isLoggable(Level.WARNING)) {
+                        logger.warning(() -> String.format(
+                                "Ticket %s AV incoerente: oldest AV %s dopo OV %s, uso fallback OV",
+                                issue.optString("key"),
+                                oldestAV.getReleaseName(),
+                                openingVersion.getReleaseName()
+                        ));
+                    }
+                    affectedReleases = new ArrayList<>();
+                    affectedReleases.add(openingVersion);
                 }
-                return null;
             }
 
             Ticket ticket = new Ticket(
@@ -158,7 +194,11 @@ public class JiraInjection {
                     fixedVersion,
                     affectedReleases
             );
-            ticket.setInjectedVersion(ticket.getAffectedVersions().getFirst());
+
+            // Imposta IV se AV presente, altrimenti rimane da calcolare tramite proportion
+            if (!affectedReleases.isEmpty()) {
+                ticket.setInjectedVersion(affectedReleases.getFirst());
+            }
 
             return ticket;
         } catch (Exception e) {
@@ -172,7 +212,6 @@ public class JiraInjection {
         }
     }
 
-    /** Estrae e filtra le affected releases coerenti con le release del progetto */
     @NotNull
     private List<Release> extractValidAffectedReleases(JSONArray affectedVersionsArray) {
         List<Release> validReleases = new ArrayList<>();
@@ -187,25 +226,6 @@ public class JiraInjection {
         }
         validReleases.sort(Comparator.comparing(Release::getReleaseDate));
         return validReleases;
-    }
-
-    /** Controlla se il ticket è coerente rispetto alle release di apertura, fix e affected releases */
-    private boolean isTicketValid(@Nullable Release openingVersion, @Nullable Release fixedVersion, List<Release> affectedReleases) {
-        if (openingVersion == null || fixedVersion == null) return false;
-
-        // OV <= FV
-        if (fixedVersion.getReleaseDate().isBefore(openingVersion.getReleaseDate())) return false;
-
-        // Tutte le affected releases devono essere tra OV e FV
-        for (Release r : affectedReleases) {
-            if (r.getReleaseDate().isBefore(openingVersion.getReleaseDate()) ||
-                    r.getReleaseDate().isAfter(fixedVersion.getReleaseDate())) {
-                return false;
-            }
-        }
-
-        // Esclude ticket antecedenti alla prima release
-        return openingVersion.getId() != this.releases.getFirst().getId();
     }
 
     private void filterFixedApplyingProportion() {
@@ -241,42 +261,66 @@ public class JiraInjection {
 
         List<Release> affectedVersionsList = new ArrayList<>();
         int injectedVersionId;
-        //IV = max(1; FV-(FV-OV)*P)
-        if(ticket.getFixedVersion().getId() == ticket.getOpeningVersion().getId()){
-            injectedVersionId = Math.max(1, (int) (ticket.getFixedVersion().getId()-proportion));
-        }else{
+        // IV = max(1; FV-(FV-OV)*P)
+        if (ticket.getFixedVersion().getId() == ticket.getOpeningVersion().getId()) {
+            injectedVersionId = Math.max(1, (int) (ticket.getFixedVersion().getId() - proportion));
+        } else {
             injectedVersionId = Math.max(1, (int) (ticket.getFixedVersion().getId()
-                    -((ticket.getFixedVersion().getId()-ticket.getOpeningVersion().getId())*proportion)));
+                    - ((ticket.getFixedVersion().getId() - ticket.getOpeningVersion().getId()) * proportion)));
         }
-        for (Release release : this.releases){
-            if(release.getId() == injectedVersionId){
+        for (Release release : this.releases) {
+            if (release.getId() == injectedVersionId) {
                 affectedVersionsList.add(new Release(release.getId(), release.getReleaseName(), release.getReleaseDate()));
                 break;
             }
         }
         affectedVersionsList.sort(Comparator.comparing(Release::getReleaseDate));
         ticket.setAffectedVersions(affectedVersionsList);
-        ticket.setInjectedVersion(affectedVersionsList.getFirst());
+
+        // protezione: se non ho trovato la release calcolata, scelgo fallback
+        if (!affectedVersionsList.isEmpty()) {
+            ticket.setInjectedVersion(affectedVersionsList.getFirst());
+        } else {
+            // fallback: usa openingVersion se presente, altrimenti fixedVersion
+            if (ticket.getOpeningVersion() != null) {
+                ticket.setInjectedVersion(ticket.getOpeningVersion());
+                ticket.setAffectedVersions(List.of(ticket.getOpeningVersion()));
+            } else {
+                ticket.setInjectedVersion(ticket.getFixedVersion());
+                ticket.setAffectedVersions(List.of(ticket.getFixedVersion()));
+            }
+            SeLogger.getInstance().getLogger().warning(() ->
+                    String.format("[%s] fall-back IV for ticket %s (no matching release for injected id=%d)",
+                            projName, ticket.getTicketKey(), injectedVersionId));
+        }
     }
 
-    //aggiunge tutte le affected versions di un ticket
+    // aggiunge tutte le affected versions di un ticket
     private void adjustAffectedVersions(@NotNull Ticket ticket) {
         List<Release> completeAffectedVersionsList = new ArrayList<>();
-        for(int i = ticket.getInjectedVersion().getId(); i < ticket.getFixedVersion().getId(); i++){
-            for(Release release : this.releases){
-                if(release.getId() == i){
-                    completeAffectedVersionsList.add(new Release(release.getId(),
-                            release.getReleaseName(), release.getReleaseDate()));
-                    break;
-                }
+
+        // Creo una mappa id -> release per lookup rapido
+        Map<Integer, Release> releaseMap = new HashMap<>();
+        for (Release r : this.releases) {
+            releaseMap.put(r.getId(), r);
+        }
+
+        int ivId = ticket.getInjectedVersion().getId();
+        int fvId = ticket.getFixedVersion().getId();
+
+        for (int i = ivId; i < fvId; i++) {
+            Release r = releaseMap.get(i);
+            if (r != null) {
+                completeAffectedVersionsList.add(new Release(r.getId(), r.getReleaseName(), r.getReleaseDate()));
             }
         }
+
         completeAffectedVersionsList.sort(Comparator.comparing(Release::getReleaseDate));
         ticket.setAffectedVersions(completeAffectedVersionsList);
     }
 
+
     private @Nullable Release getReleaseAfterOrEqualDate(LocalDate specificDate, @NotNull List<Release> releasesList) {
-        releasesList.sort(Comparator.comparing(Release::getReleaseDate));
         for (Release release : releasesList) {
             if (!release.getReleaseDate().isBefore(specificDate)) {
                 return release;
@@ -334,10 +378,19 @@ public class JiraInjection {
 
     /** Converte un JSONObject in un Optional<Release> se valido */
     private Optional<Release> parseRelease(JSONObject releaseJson) {
-        if (releaseJson.has(RELEASE_DATE) && releaseJson.has("name")) {
-            String name = releaseJson.getString("name");
-            LocalDate date = LocalDate.parse(releaseJson.getString(RELEASE_DATE));
-            return Optional.of(new Release(name, date));
+        try {
+            if (releaseJson.has(RELEASE_DATE) && releaseJson.has("name")) {
+                String name = releaseJson.getString("name");
+                String dateStr = releaseJson.getString(RELEASE_DATE);
+                LocalDate date = LocalDate.parse(dateStr);
+                return Optional.of(new Release(name, date));
+            }
+        } catch (DateTimeParseException e) {
+            SeLogger.getInstance().getLogger().warning(() ->
+                    String.format("Ignoring release with malformed date for project %s: %s", projName, e.getMessage()));
+        } catch (Exception e) {
+            SeLogger.getInstance().getLogger().warning(() ->
+                    String.format("Ignoring invalid release entry for project %s: %s", projName, e.getMessage()));
         }
         return Optional.empty();
     }
@@ -349,5 +402,58 @@ public class JiraInjection {
         for (Release release : releases) {
             release.setId(id++);
         }
+    }
+
+    // --- helper per serializzazione ticket in JSON ---
+    private JSONArray ticketsToJsonArray(List<Ticket> tickets) {
+        JSONArray arr = new JSONArray();
+        if (tickets == null) return arr;
+        for (Ticket t : tickets) {
+            arr.put(ticketToJson(t));
+        }
+        return arr;
+    }
+
+    private JSONObject ticketToJson(Ticket t) {
+        JSONObject obj = new JSONObject();
+        try {
+            obj.put("key", t.getTicketKey());
+            obj.put("creationDate", t.getCreationDate() == null ? JSONObject.NULL : t.getCreationDate().toString());
+            obj.put("resolutionDate", t.getResolutionDate() == null ? JSONObject.NULL : t.getResolutionDate().toString());
+
+            Release ov = t.getOpeningVersion();
+            Release fv = t.getFixedVersion();
+            Release iv = t.getInjectedVersion();
+
+            if (ov != null) {
+                obj.put("openingVersion", Map.of("id", ov.getId(), "name", ov.getReleaseName(), "date", ov.getReleaseDate().toString()));
+            } else {
+                obj.put("openingVersion", JSONObject.NULL);
+            }
+            if (fv != null) {
+                obj.put("fixedVersion", Map.of("id", fv.getId(), "name", fv.getReleaseName(), "date", fv.getReleaseDate().toString()));
+            } else {
+                obj.put("fixedVersion", JSONObject.NULL);
+            }
+            if (iv != null) {
+                obj.put("injectedVersion", Map.of("id", iv.getId(), "name", iv.getReleaseName(), "date", iv.getReleaseDate().toString()));
+            } else {
+                obj.put("injectedVersion", JSONObject.NULL);
+            }
+
+            JSONArray affected = new JSONArray();
+            List<Release> avs = t.getAffectedVersions();
+            if (avs != null) {
+                for (Release r : avs) {
+                    affected.put(Map.of("id", r.getId(), "name", r.getReleaseName(), "date", r.getReleaseDate().toString()));
+                }
+            }
+            obj.put("affectedVersions", affected);
+
+        } catch (Exception e) {
+            SeLogger.getInstance().getLogger().warning(() ->
+                    String.format("Unable to convert ticket %s to JSON: %s", t.getTicketKey(), e.getMessage()));
+        }
+        return obj;
     }
 }

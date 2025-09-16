@@ -2,33 +2,20 @@ package org.example.controller;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ListBranchCommand;
-import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.diff.Edit;
-import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.RevCommit;
-import org.eclipse.jgit.revwalk.RevTree;
-import org.eclipse.jgit.treewalk.TreeWalk;
-import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.example.logging.SeLogger;
 import org.example.model.*;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,288 +29,202 @@ public class GitInjection implements AutoCloseable {
     public static final String LOCAL_DATE_FORMAT = "yyyy-MM-dd";
     private static final String TEMP = ".temp" + File.separator;
     private static final String GIT = File.separator + ".git";
-    public static final String PMD_ANALYSIS = "pmdAnalysis";
     public static final String RELEASE = "release";
     public static final String TEST = "Test";
-    public static final String JAVA_EXTENTION = ".java";
-    private static final String SYS_PMD_HOME = "PMD_HOME";
 
     private final String repoPath;
     private final String lastBranch;
 
-    private List<Ticket> tickets;
+    private List<Ticket> tickets = new ArrayList<>();
     private final List<Release> releases;
     protected final Git localGithub;
     private final Repository repository;
 
-    private List<Commit> commits;
-    private List<Commit> commitsWithIssues;
+    private List<Commit> commits = new ArrayList<>();
+    private List<Commit> commitsWithIssues = new ArrayList<>();
 
-    private List<JavaClass> javaClasses;
-    private Map<Release, List<JavaClass>> javaClassPerRelease = new LinkedHashMap<>();
-    public final Map<RevCommit, List<String>> modifiedClassesForCommit;
+    // Mappa condivisa tra thread per evitare doppio clone
+    private static final ConcurrentHashMap<String, Repository> repoCache = new ConcurrentHashMap<>();
+
+    private final Map<Release, List<JavaClass>> javaClassPerRelease = new LinkedHashMap<>();
 
     private final String project;
     private final Logger logger = SeLogger.getInstance().getLogger();
-    private final String logName;
 
-    /**
-     * Constructor of GitInjection
-     *
-     * @param targetName  the project target
-     * @param targetUrl   the GitHub repository URL
-     * @param releaseList all release retrieved in Jira
-     */
+
     public GitInjection(@NotNull String targetName, String targetUrl, List<Release> releaseList)
             throws GitAPIException, IOException {
+
         this.project = targetName;
         this.repoPath = TEMP + targetName.toLowerCase(Locale.getDefault());
         File directory = new File(repoPath);
-        if (!directory.exists()) {
-            localGithub = Git.cloneRepository().setURI(targetUrl).setDirectory(directory).call();
-            repository = localGithub.getRepository();
-        } else {
-            repository = new FileRepository(repoPath + GIT);
-            localGithub = new Git(repository);
-        }
+
+        // Thread-safe clone o riuso della repo esistente
+        this.repository = repoCache.computeIfAbsent(targetName, key -> {
+            try {
+                if (!directory.exists()) {
+                    Git git = Git.cloneRepository()
+                            .setURI(targetUrl)
+                            .setDirectory(directory)
+                            .call();
+                    return git.getRepository();
+                } else {
+                    return new FileRepository(repoPath + GIT);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to initialize repository: " + targetName, e);
+            }
+        });
+
+        this.localGithub = new Git(repository);
         this.releases = releaseList != null ? releaseList : new ArrayList<>();
-        this.tickets = new ArrayList<>();
-        this.commits = new ArrayList<>();
-        this.commitsWithIssues = new ArrayList<>();
-        this.javaClasses = new ArrayList<>();
-        this.modifiedClassesForCommit = new HashMap<>();
-        this.logName = this.getClass().getSimpleName() + "#" + targetName;
+
         String branch = null;
         try {
             branch = repository.getBranch();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logWarning(() -> "Unable to get current branch: " + e.getMessage());
         }
         this.lastBranch = branch;
     }
 
     /**
-     * Used to inject commits in the revCommitList
+     * Inject commits from all branches into commits list and associate them to releases
      */
     public void injectCommits() throws GitAPIException, IOException {
-        Set<RevCommit> revCommitSet = new HashSet<>();
-        List<Ref> allBranches = localGithub.branchList()
-                .setListMode(ListBranchCommand.ListMode.ALL)
-                .call();
+        List<RevCommit> revCommits = new ArrayList<>();
+        List<Ref> allBranches = localGithub.branchList().setListMode(ListBranchCommand.ListMode.ALL).call();
 
+        // Raccolta commit senza duplicati
         for (Ref branch : allBranches) {
-            Iterable<RevCommit> branchCommits = localGithub.log()
-                    .add(this.repository.resolve(branch.getName()))
-                    .call();
+            Iterable<RevCommit> branchCommits = localGithub.log().add(repository.resolve(branch.getName())).call();
             for (RevCommit branchCommit : branchCommits) {
-                revCommitSet.add(branchCommit); // HashSet evita duplicati
+                if (!revCommits.contains(branchCommit)) {
+                    revCommits.add(branchCommit);
+                }
             }
         }
 
-        // Filtra commit senza committer o senza data
-        List<RevCommit> revCommits = revCommitSet.stream()
-                .filter(rc -> rc.getCommitterIdent() != null)
-                .filter(rc -> rc.getCommitterIdent().getWhenAsInstant() != null)
-                .sorted(Comparator.comparing(rc -> rc.getCommitterIdent().getWhenAsInstant()))
-                .toList();
+        revCommits.sort(Comparator.comparing(rc -> Date.from(rc.getCommitterIdent().getWhenAsInstant())));
 
+        // Conversione commit → Commit associati alle release
         this.commits = new ArrayList<>();
-
+        SimpleDateFormat formatter = new SimpleDateFormat(LOCAL_DATE_FORMAT);
         for (RevCommit revCommit : revCommits) {
-            Instant commitInstant = revCommit.getCommitterIdent().getWhenAsInstant();
-            LocalDateTime commitDateTime = LocalDateTime.ofInstant(commitInstant, ZoneId.systemDefault());
+            LocalDate commitDate = LocalDate.parse(formatter.format(Date.from(revCommit.getCommitterIdent().getWhenAsInstant())));
+            LocalDate lowerBoundDate = LocalDate.parse(formatter.format(new Date(0))); // 1970-01-01
 
-            // Trova la release giusta con ricerca binaria
-            Release targetRelease = findReleaseForCommit(commitDateTime, this.releases);
-            if (targetRelease != null) {
-                Commit newCommit = new Commit(revCommit, targetRelease);
-                this.commits.add(newCommit);
-                targetRelease.addCommit(newCommit);
+            for (Release release : this.releases) {
+                LocalDate releaseDate = release.getReleaseDate();
+                if (commitDate.isAfter(lowerBoundDate) && !commitDate.isAfter(releaseDate)) {
+                    Commit newCommit = new Commit(revCommit, release);
+                    this.commits.add(newCommit);
+                    release.addCommit(newCommit);
+                }
+                lowerBoundDate = releaseDate;
             }
         }
 
         // Rimuove release senza commit
-        this.releases.removeIf(release -> release.getCommitList() == null || release.getCommitList().isEmpty());
+        releases.removeIf(release -> release.getCommitList() == null || release.getCommitList().isEmpty());
 
         // Riassegna ID progressivi
-        int i = 0;
-        for (Release release : this.releases) {
-            release.setId(++i);
+        int id = 0;
+        for (Release release : releases) {
+            release.setId(++id);
         }
 
-        // Ordina i commit cronologicamente
-        this.commits.sort(Comparator.comparing(c -> c.getRevCommit().getCommitterIdent().getWhenAsInstant()));
+        this.commits.sort(Comparator.comparing(c -> Date.from(c.getRevCommit().getCommitterIdent().getWhenAsInstant())));
 
-        logInfo(() -> "injectCommits finished: commits=" + this.commits.size() + ", releases=" + this.releases.size());
+        logInfo(() -> "injectCommits finished: commits=" + commits.size() + ", releases=" + releases.size());
     }
 
     /**
-     * Cerca nei messaggi dei commit riferimenti a ticket e collega ticket<->commit
+     * Associate commits to tickets by searching ticket keys in commit messages
      */
     public void preprocessCommitsWithIssue() {
-
-        //lista di commit filtrati
         this.commitsWithIssues = new ArrayList<>();
 
-        for (Commit commit : Optional.ofNullable(this.commits).orElse(Collections.emptyList())) {
-            String fullMessageRaw = null;
-            //per ogni commit, viene recuperato il messaggio completo associato
-            try {
-                if (commit.getRevCommit() != null) fullMessageRaw = commit.getRevCommit().getFullMessage();
-            } catch (Exception e) {
-                logWarning(() -> "Error getting fullMessage for commit: " + e.getMessage());
+        for (Commit commit : this.commits) {
+            String fullMessage = safeString(commit.getRevCommit() != null ? commit.getRevCommit().getFullMessage() : "");
+            if (fullMessage.isEmpty()) {
+                logWarning(() -> {
+                    assert commit.getRevCommit() != null;
+                    return "Found null or empty commit message for commit: " + commit.getRevCommit().getName();
+                });
             }
 
-            String fullMessage = Optional.ofNullable(fullMessageRaw).orElse("");
-            if (fullMessageRaw == null) {
-                logWarning(() -> "Found null fullMessage in commit");
-            }
-
-            for (Ticket ticket : Optional.ofNullable(this.tickets).orElse(Collections.emptyList())) {
-                String ticketKeyRaw = null;
-                //per ogni ticket, invece, viene recuperata la ticket key
-                try {
-                    ticketKeyRaw = ticket.getTicketKey();
-                } catch (Exception e) {
-                    logWarning(() -> "Error getting ticketKey for ticket: " + e.getMessage());
-                }
-
-                String ticketKey = Optional.ofNullable(ticketKeyRaw).map(String::trim).orElse("");
-                if (ticketKeyRaw == null) {
-                    logWarning(() -> "Found null ticketKey in ticket");
-                }
-
+            for (Ticket ticket : this.tickets) {
+                String ticketKey = safeString(ticket.getTicketKey()).trim();
                 if (ticketKey.isEmpty()) continue;
 
-                // regex per match esatto come parola --> controlliamo se il commit ha al suo interno la ticket_key
                 if (Pattern.compile("\\b" + Pattern.quote(ticketKey) + "\\b").matcher(fullMessage).find()) {
-                    this.commitsWithIssues.add(commit); //se presente lo aggiungo
+                    this.commitsWithIssues.add(commit);
                     ticket.addCommit(commit);
                     commit.setTicket(ticket);
                 }
             }
         }
 
-        // Rimuove ticket senza commit associati
-        if (this.tickets != null) {
-            this.tickets.removeIf(ticket -> ticket.getCommitList() == null || ticket.getCommitList().isEmpty());
-        }
-        logInfo(() -> "preprocessCommitsWithIssue finished: commitsWithIssues=" + this.commitsWithIssues.size());
+        // Rimuove ticket senza commit
+        this.tickets.removeIf(t -> t.getCommitList() == null || t.getCommitList().isEmpty());
+
+        logInfo(() -> "preprocessCommitsWithIssue finished: commitsWithIssues=" + commitsWithIssues.size());
     }
 
     /**
-     * Delegates heavy Java-class preprocessing to PreProcessJavaClass, then updates local maps
+     * Delegate Java class preprocessing to PreProcessJavaClass
      */
     public void preprocessJavaClasses() throws IOException {
-        PreProcessJavaClass pre = new PreProcessJavaClass(
-                this.repository, this.localGithub, this.releases,
-                this.commits, this.tickets, this.project, this.repoPath
-        );
-
-        pre.setLastBranch(this.lastBranch);
+        List<JavaClass> javaClasses;
+        PreProcessJavaClass pre = new PreProcessJavaClass(repository, localGithub, releases, commits, tickets, project, repoPath);
+        pre.setLastBranch(lastBranch);
         pre.preprocessJavaClasses();
 
-        // adopt results
-        this.javaClasses = Optional.ofNullable(pre.getJavaClasses()).orElse(new ArrayList<>());
-        this.commitsWithIssues = Optional.ofNullable(pre.getCommitsWithIssues()).orElse(new ArrayList<>());
+        javaClasses = Optional.ofNullable(pre.getJavaClasses()).orElse(new ArrayList<>());
+        commitsWithIssues = Optional.ofNullable(pre.getCommitsWithIssues()).orElse(new ArrayList<>());
 
-        // rebuild javaClassPerRelease map here (grouping)
-        this.javaClassPerRelease = new LinkedHashMap<>();
-        for (JavaClass jc : this.javaClasses) {
-            this.javaClassPerRelease.computeIfAbsent(jc.getRelease(), k -> new ArrayList<>()).add(jc);
+        // rebuild javaClassPerRelease map
+        javaClassPerRelease.clear();
+        for (JavaClass jc : javaClasses) {
+            javaClassPerRelease.computeIfAbsent(jc.getRelease(), _ -> new ArrayList<>()).add(jc);
         }
-        logInfo(() -> "preprocessJavaClasses finished: javaClasses=" + this.javaClasses.size());
+
+        List<JavaClass> finalJavaClasses = javaClasses;
+        logInfo(() -> "preprocessJavaClasses finished: javaClasses=" + finalJavaClasses.size());
     }
 
-    /**
-     * Returning the ClassName and Body (utility kept for backward compatibility)
-     */
-    public static @NotNull Map<String, String> getAllClassesNameAndContent(@NotNull RevCommit revCommit,
-                                                                           Repository repository) throws IOException {
-        Map<String, String> allClasses = new HashMap<>();
-        RevTree tree = revCommit.getTree();
-        try (TreeWalk treeWalk = new TreeWalk(repository)) {
-            treeWalk.addTree(tree);
-            treeWalk.setRecursive(true);
-            while (treeWalk.next()) {
-                String path = treeWalk.getPathString();
-                if (path.contains(JAVA_EXTENTION) && !path.contains("/test/")) {
-                    allClasses.put(path, new String(repository.open(treeWalk.getObjectId(0)).getBytes(), StandardCharsets.UTF_8));
-                }
-            }
-        }
-        return allClasses;
-    }
+    // --- Getters ---
+    public List<Commit> getCommitsWithIssues() { return Collections.unmodifiableList(commitsWithIssues); }
+    public Repository getRepository() { return repository; }
+    public Map<Release, List<JavaClass>> getJavaClassPerRelease() { return Collections.unmodifiableMap(javaClassPerRelease); }
+    public String getProject() { return project; }
+    public Logger getLogger() { return logger; }
 
-    // --- helper per PMD/processi esterni (invariati logicamente) ---
-    private void cleanGitState() throws IOException {
-        String gitDir = repoPath + File.separator + ".git" + File.separator;
-        String[] mergeFiles = {"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "index"};
-        for (String file : mergeFiles) {
-            File f = new File(gitDir + file);
-            if (f.exists()) Files.delete(f.toPath());
+
+    // --- Helpers ---
+    private String safeString(String s) { return s != null ? s : ""; }
+
+    private void logInfo(Supplier<String> msgSupplier) { if (logger.isLoggable(Level.INFO)) logger.info(msgSupplier.get()); }
+    private void logWarning(Supplier<String> msgSupplier) { if (logger.isLoggable(Level.WARNING)) logger.warning(msgSupplier.get()); }
+
+    @Override
+    public void close() { closeRepo(); }
+
+    public void closeRepo() {
+        try {
+            if (localGithub != null) localGithub.close();
+            if (repository != null) repository.close();
+        } catch (Exception e) {
+            logWarning(() -> "Error closing repository: " + e.getMessage());
         }
     }
 
-    @Contract("_ -> new")
-    private @NotNull Process getProcess(int id) throws IOException {
-        final String pmd = System.getenv(SYS_PMD_HOME) + File.separator + "bin" + File.separator + "pmd";
-        final String reportPath = PMD_ANALYSIS + File.separator + this.project + File.separator + id + ".csv";
-        return new ProcessBuilder(
-                pmd,
-                "check",
-                "-d", this.repoPath,
-                "-R", Objects.requireNonNull(GitInjection.class.getClassLoader().getResource("pmd/custom.xml")).getPath(),
-                "-f", "csv",
-                "--no-cache",
-                "-r", reportPath
-        ).redirectErrorStream(true).start();
-    }
+    // --- Setters for testing / external injection ---
+    public void setTickets(List<Ticket> tickets) { this.tickets = tickets != null ? tickets : new ArrayList<>(); }
+    public void setCommits(List<Commit> commits) { this.commits = commits != null ? commits : new ArrayList<>(); }
 
-    public List<Commit> getCommitsWithIssues() {
-        return commitsWithIssues;
-    }
-
-    public List<JavaClass> getJavaClasses() {
-        return this.javaClasses;
-    }
-
-    public void checkLOCInfo(@NotNull JavaClass javaClass) {
-        for (Commit commit : javaClass.getClassCommits()) {
-            RevCommit revCommit = commit.getRevCommit();
-            try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-                RevCommit parentComm = revCommit.getParent(0);
-                diffFormatter.setRepository(repository);
-                diffFormatter.setDiffComparator(RawTextComparator.DEFAULT);
-                List<DiffEntry> diffEntries = diffFormatter.scan(parentComm.getTree(), revCommit.getTree());
-                for (DiffEntry diffEntry : diffEntries) {
-                    if (diffEntry.getNewPath().equals(javaClass.getName())) {
-                        javaClass.addLOCAddedByClass(getAddedLines(diffFormatter, diffEntry));
-                        javaClass.addLOCRemovedByClass(getDeletedLines(diffFormatter, diffEntry));
-                    }
-                }
-            } catch (ArrayIndexOutOfBoundsException | IOException ignored) {
-                //ignoring when no parent is found
-            }
-        }
-    }
-
-    private int getAddedLines(@NotNull DiffFormatter diffFormatter, DiffEntry entry) throws IOException {
-        int addedLines = 0;
-        for (Edit edit : diffFormatter.toFileHeader(entry).toEditList()) {
-            addedLines += edit.getEndB() - edit.getBeginB();
-        }
-        return addedLines;
-    }
-
-    private int getDeletedLines(@NotNull DiffFormatter diffFormatter, DiffEntry entry) throws IOException {
-        int deletedLines = 0;
-        for (Edit edit : diffFormatter.toFileHeader(entry).toEditList()) {
-            deletedLines += edit.getEndA() - edit.getBeginA();
-        }
-        return deletedLines;
-    }
-
-    public Map<String, String> getMapTickets() {
+    public Collection<Object> getMapTickets() {
         Map<String, String> mapTickets = new HashMap<>();
         if (this.tickets != null) this.tickets.sort(Comparator.comparing(Ticket::getCreationDate));
         for (Ticket ticket : Optional.ofNullable(this.tickets).orElse(Collections.emptyList())) {
@@ -341,141 +242,33 @@ public class GitInjection implements AutoCloseable {
             inner.put("resolutionDate", ticket.getResolutionDate() != null ? ticket.getResolutionDate().toString() : "null");
             mapTickets.put(ticket.getTicketKey(), inner.toString());
         }
-
-        return mapTickets;
+        return new ArrayList<>(mapTickets.values());
     }
 
-    public Map<String, String> getMapCommits() {
+    public Collection<Object> getMapCommits() {
         Map<String, String> mapCommits = new HashMap<>();
         for (Commit commit : Optional.ofNullable(this.commits).orElse(Collections.emptyList())) {
             Map<String, String> inner = new LinkedHashMap<>();
             RevCommit revCommit = commit.getRevCommit();
             Ticket ticket = commit.getTicket();
             Release release = commit.getRelease();
-            if (ticket != null) inner.put("ticketKey", commit.getTicket().getTicketKey());
+            if (ticket != null) inner.put("ticketKey", ticket.getTicketKey());
             inner.put(RELEASE, release != null ? release.getReleaseName() : "null");
-            inner.put("creationDate", String.valueOf(LocalDate.parse((new SimpleDateFormat(LOCAL_DATE_FORMAT)
-                    .format(Date.from(revCommit.getCommitterIdent().getWhenAsInstant()))))));
+            inner.put("creationDate", String.valueOf(
+                    LocalDate.parse(new SimpleDateFormat(LOCAL_DATE_FORMAT)
+                            .format(Date.from(revCommit.getCommitterIdent().getWhenAsInstant())))
+            ));
             mapCommits.put(revCommit.getName(), inner.toString());
         }
-        return mapCommits;
+        return new ArrayList<>(mapCommits.values());
     }
 
-    public Map<String, String> getMapSummary() {
+    public Collection<Object> getMapSummary() {
         Map<String, String> summaryMap = new HashMap<>();
         summaryMap.put("Releases", String.valueOf(Optional.ofNullable(this.releases).map(List::size).orElse(0)));
         summaryMap.put("Tickets", String.valueOf(Optional.ofNullable(this.tickets).map(List::size).orElse(0)));
         summaryMap.put("Commits", String.valueOf(Optional.ofNullable(this.commits).map(List::size).orElse(0)));
         summaryMap.put("Commits with bugs", String.valueOf(Optional.ofNullable(this.commitsWithIssues).map(List::size).orElse(0)));
-        return summaryMap;
-    }
-
-    private void restoreRepositoryState() {
-        if (lastBranch == null) {
-            logWarning(() -> "No branch to restore to");
-            return;
-        }
-        try {
-            // reset and clean
-            localGithub.reset().setMode(ResetCommand.ResetType.HARD).call();
-            localGithub.clean().setCleanDirectories(true).call();
-
-            // checkout back to saved branch
-            localGithub.checkout().setName(lastBranch).call();
-
-            logInfo(() -> "Repository restored to branch " + lastBranch + " at HEAD");
-        } catch (GitAPIException e) {
-            logError(() -> "reset the repo: " + e.getMessage());
-        }
-    }
-
-    public void setTickets(List<Ticket> tickets) {
-        this.tickets = tickets;
-    }
-
-    public void setCommits(List<Commit> commits) {
-        this.commits = commits;
-    }
-
-    public List<Ticket> getTickets() {
-        return tickets;
-    }
-
-    public List<Release> getReleases() {
-        return releases;
-    }
-
-    public Repository getRepository() {
-        return repository;
-    }
-
-    public List<Commit> getCommits() {
-        return commits;
-    }
-
-    public Map<Release, List<JavaClass>> getJavaClassPerRelease() {
-        return javaClassPerRelease;
-    }
-
-    public String getProject() {
-        return project;
-    }
-
-    public Logger getLogger() {
-        return logger;
-    }
-
-    public String getLogName() {
-        return logName;
-    }
-
-    // --- logging helpers (lazy suppliers to avoid expensive concat) ---
-    private void logInfo(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.INFO)) logger.info(msgSupplier.get());
-    }
-    private void logWarning(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.WARNING)) logger.warning(msgSupplier.get());
-    }
-    private void logError(Supplier<String> msgSupplier) {
-        if (logger.isLoggable(Level.SEVERE)) logger.severe(msgSupplier.get());
-    }
-
-    private Release findReleaseForCommit(LocalDateTime commitDateTime, List<Release> releases) {
-        int left = 0;
-        int right = releases.size() - 1;
-        Release result = null;
-
-        while (left <= right) {
-            int mid = (left + right) / 2;
-            Release midRelease = releases.get(mid);
-            LocalDateTime releaseDateTime = midRelease.getReleaseDate().atStartOfDay();
-
-            if (!commitDateTime.isAfter(releaseDateTime)) {
-                result = midRelease;
-                right = mid - 1;
-            } else {
-                left = mid + 1;
-            }
-        }
-
-        return result;
-    }
-
-    @Override
-    public void close() {
-        closeRepo();
-    }
-
-    public void closeRepo() {
-        try {
-            if (localGithub != null) {
-                localGithub.close();
-            }
-            if (repository != null) {
-                repository.close();
-            }
-        } catch (Exception e) {
-            logWarning(() -> "Error closing repository: " + e.getMessage());
-        }
+        return new ArrayList<>(summaryMap.values());
     }
 }
