@@ -90,7 +90,6 @@ public class JiraInjection {
 
         this.ticketsWithIssues = new ArrayList<>();
         int totalTickets = 0;
-        int validTickets = 0;
         int startAt = 0;
 
         int total;
@@ -106,19 +105,23 @@ public class JiraInjection {
                 Ticket ticket = buildTicket(issue);
                 if (ticket != null) {
                     this.ticketsWithIssues.add(ticket);
-                    validTickets++;
                 }
             }
         } while (startAt < total);
 
+        // ordino per data di risoluzione
         this.ticketsWithIssues.sort(Comparator.comparing(Ticket::getResolutionDate));
+
+        // calcolo i valid tickets solo ora (quelli già "corretti" senza proportion)
+        int validTickets = (int) this.ticketsWithIssues.stream()
+                .filter(Ticket::isCorrectTicket)
+                .count();
 
         if (logger.isLoggable(Level.INFO)) {
             int finalTotalTickets = totalTickets;
-            int finalValidTickets = validTickets;
             logger.info(() -> String.format(
                     "project=%s, total tickets=%d, valid tickets=%d",
-                    projName, finalTotalTickets, finalValidTickets
+                    projName, finalTotalTickets, validTickets
             ));
         }
     }

@@ -92,6 +92,7 @@ public class GitInjection implements AutoCloseable {
      * Inject commits from all branches into commits list and associate them to releases
      */
     public void injectCommits() throws GitAPIException, IOException {
+        //raccolta di tutti i commit da tutti i branch
         List<RevCommit> revCommits = new ArrayList<>();
         List<Ref> allBranches = localGithub.branchList().setListMode(ListBranchCommand.ListMode.ALL).call();
 
