@@ -65,30 +65,32 @@ public class Pipeline implements Runnable {
                     gitInjection.preprocessCommitsWithIssue();
                 });
 
-//                // Java Class Injection
-//                measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
-//
-//                // Log conteggi
-//                logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
-//                logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
-//                logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
-//                logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
-//                logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
-//
-//                // Salvataggio dati base
-//                measureExecutionChecked("Store injection data", () -> storeCurrentData(jiraInjection, gitInjection));
+                // Java Class Injection
+                measureExecutionChecked("Java class injection", gitInjection::preprocessJavaClasses);
 
-//                // Export tickets_commits
-//                measureExecutionChecked("Export tickets_commits", () ->
-//                        exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON));
+                // Log conteggi
+                logInfo(() -> "Releases count: " + jiraInjection.getMapReleases().size());
+                logInfo(() -> "Tickets count: " + gitInjection.getMapTickets().size());
+                logInfo(() -> "Commits count: " + gitInjection.getMapCommits().size());
+                logInfo(() -> "Summary count: " + gitInjection.getMapSummary().size());
+                logInfo(() -> "Fixed tickets count: " + jiraInjection.getFixedTickets().size());
 
-//                // 🔹 Preprocessing Project
-//                measureExecutionChecked("Preprocessing project", () -> {
-//                    Sink.serializeProjectAsCsv(gitInjection);
-//                    PreprocessMetrics preprocessMetrics = new PreprocessMetrics(gitInjection);
-//                    preprocessMetrics.start();
-//                    storeCurrentData(jiraInjection, gitInjection);
-//                    preprocessMetrics.generateDataset(targetName);
+                // Salvataggio dati base
+                measureExecutionChecked("Store injection data", () -> storeCurrentData(jiraInjection, gitInjection));
+
+                // Export tickets_commits
+                measureExecutionChecked("Export tickets_commits", () ->
+                        exportTicketsAndCommits(targetName, jiraInjection.getFixedTickets(), Sink.FileExtension.JSON));
+
+                // Preprocessing Project
+                measureExecutionChecked("Preprocessing project", () -> {
+                    Sink.serializeProjectAsCsv(gitInjection); // opzionale, se vuoi esportare CSV completo
+                    PreprocessMetrics preprocessMetrics = new PreprocessMetrics(gitInjection);
+                    preprocessMetrics.start();              // calcola tutte le metriche
+                    storeCurrentData(jiraInjection, gitInjection); // salva di nuovo se vuoi includere metriche calcolate
+                    preprocessMetrics.generateDataset(targetName); // genera il dataset
+                });
+
 //
 //                    // 🔹 Classification Phase
 //                    WekaProcessing = new WekaProcessing(this.targetName,

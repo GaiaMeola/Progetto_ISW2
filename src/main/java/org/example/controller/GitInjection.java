@@ -33,7 +33,6 @@ public class GitInjection implements AutoCloseable {
     public static final String TEST = "Test";
 
     private final String repoPath;
-    private final String lastBranch;
 
     private List<Ticket> tickets = new ArrayList<>();
     private final List<Release> releases;
@@ -52,15 +51,14 @@ public class GitInjection implements AutoCloseable {
     private final Logger logger = SeLogger.getInstance().getLogger();
 
 
-    public GitInjection(@NotNull String targetName, String targetUrl, List<Release> releaseList)
-            throws GitAPIException, IOException {
+    public GitInjection(@NotNull String targetName, String targetUrl, List<Release> releaseList) {
 
         this.project = targetName;
         this.repoPath = TEMP + targetName.toLowerCase(Locale.getDefault());
         File directory = new File(repoPath);
 
         // Thread-safe clone o riuso della repo esistente
-        this.repository = repoCache.computeIfAbsent(targetName, key -> {
+        this.repository = repoCache.computeIfAbsent(targetName, ignored -> {
             try {
                 if (!directory.exists()) {
                     Git git = Git.cloneRepository()
@@ -78,14 +76,6 @@ public class GitInjection implements AutoCloseable {
 
         this.localGithub = new Git(repository);
         this.releases = releaseList != null ? releaseList : new ArrayList<>();
-
-        String branch = null;
-        try {
-            branch = repository.getBranch();
-        } catch (Exception e) {
-            logWarning(() -> "Unable to get current branch: " + e.getMessage());
-        }
-        this.lastBranch = branch;
     }
 
     /**
@@ -177,10 +167,12 @@ public class GitInjection implements AutoCloseable {
      * Delegate Java class preprocessing to PreProcessJavaClass
      */
     public void preprocessJavaClasses() throws IOException {
+        //metodo wrapper
         List<JavaClass> javaClasses;
-        PreProcessJavaClass pre = new PreProcessJavaClass(repository, localGithub, releases, commits, tickets, project, repoPath);
-        pre.setLastBranch(lastBranch);
-        pre.preprocessJavaClasses();
+        PreProcessJavaClass pre = new PreProcessJavaClass(repository, releases, tickets, project);
+        //creazione di un PreProcessJavaClass
+
+        pre.preprocessJavaClasses(); //estrazione dei file.java da ogni commit
 
         javaClasses = Optional.ofNullable(pre.getJavaClasses()).orElse(new ArrayList<>());
         commitsWithIssues = Optional.ofNullable(pre.getCommitsWithIssues()).orElse(new ArrayList<>());
@@ -188,15 +180,12 @@ public class GitInjection implements AutoCloseable {
         // rebuild javaClassPerRelease map
         javaClassPerRelease.clear();
         for (JavaClass jc : javaClasses) {
-            javaClassPerRelease.computeIfAbsent(jc.getRelease(), _ -> new ArrayList<>()).add(jc);
+            javaClassPerRelease.computeIfAbsent(jc.getRelease(), ignored -> new ArrayList<>()).add(jc);
         }
-
         List<JavaClass> finalJavaClasses = javaClasses;
         logInfo(() -> "preprocessJavaClasses finished: javaClasses=" + finalJavaClasses.size());
     }
 
-    // --- Getters ---
-    public List<Commit> getCommitsWithIssues() { return Collections.unmodifiableList(commitsWithIssues); }
     public Repository getRepository() { return repository; }
     public Map<Release, List<JavaClass>> getJavaClassPerRelease() { return Collections.unmodifiableMap(javaClassPerRelease); }
     public String getProject() { return project; }
@@ -271,5 +260,38 @@ public class GitInjection implements AutoCloseable {
         summaryMap.put("Commits", String.valueOf(Optional.ofNullable(this.commits).map(List::size).orElse(0)));
         summaryMap.put("Commits with bugs", String.valueOf(Optional.ofNullable(this.commitsWithIssues).map(List::size).orElse(0)));
         return new ArrayList<>(summaryMap.values());
+    }
+
+    // --- Getters for data access ---
+
+    /**
+     * Restituisce la lista di Release gestite da questa istanza.
+     * Ritorna sempre una lista non nulla (vuota se non inizializzata).
+     */
+    public List<Release> getReleases() {
+        return releases == null ? Collections.emptyList() : new ArrayList<>(releases);
+    }
+
+    /**
+     * Restituisce la lista di Commit raccolti.
+     * Viene restituita una copia difensiva per evitare modifiche concorrenti.
+     */
+    public List<Commit> getCommits() {
+        return commits == null ? Collections.emptyList() : new ArrayList<>(commits);
+    }
+
+    /**
+     * Restituisce la lista di Ticket associati.
+     * Se non ci sono ticket, ritorna una lista vuota.
+     */
+    public List<Ticket> getTickets() {
+        return tickets == null ? Collections.emptyList() : new ArrayList<>(tickets);
+    }
+
+    /**
+     * Restituisce i commit che sono stati associati a ticket (bug-fix, ecc.).
+     */
+    public List<Commit> getCommitsWithIssues() {
+        return commitsWithIssues == null ? Collections.emptyList() : new ArrayList<>(commitsWithIssues);
     }
 }

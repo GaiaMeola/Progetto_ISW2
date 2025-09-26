@@ -107,7 +107,7 @@
                     </descriptorRefs>
                     <archive>
                         <manifest>
-                            <mainClass>Main</mainClass>
+                            <mainClass>/Users/gaiameola/Desktop/ISPW/Progetto_ISW2/src/main/java/Main.java</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

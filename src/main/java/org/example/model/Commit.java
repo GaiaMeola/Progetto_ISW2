@@ -1,7 +1,6 @@
 package org.example.model;
 
 import org.eclipse.jgit.revwalk.RevCommit;
-
 import java.util.Objects;
 
 public final class Commit {
