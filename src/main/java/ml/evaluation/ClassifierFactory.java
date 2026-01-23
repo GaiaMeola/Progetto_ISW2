@@ -12,21 +12,19 @@ public class ClassifierFactory {
     }
 
     public static Classifier getNaiveBayes() {
-        return new NaiveBayes(); // default params
+        return new NaiveBayes();
     }
 
     public static Classifier getIBk() {
-        return new IBk(3); // puoi parametrizzare il k
+        return new IBk(3); // K=3 è un buon compromesso
     }
 
     public static Classifier getRandomForest() {
         RandomForest rf = new RandomForest();
-        rf.setNumIterations(100); // questo è spesso il nome corretto
-        rf.setNumFeatures(0); // default (√n features)
+        rf.setNumIterations(100);
+        // Usa tutti i core disponibili del tuo processore (M1/M2/M3)
         rf.setNumExecutionSlots(Runtime.getRuntime().availableProcessors());
-        rf.setSeed(42);       // riproducibilità
+        rf.setSeed(42);
         return rf;
     }
-
-
 }

@@ -10,7 +10,21 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/csv_output/fold_results.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/debug_file/bokkepper_commits_per_release.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/debug_file/bookkeeper_ticket_debug.csv">
           <value>
             <Attribute>
               <option name="separator" value=";" />
@@ -21,6 +35,27 @@
           <value>
             <Attribute>
               <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/bookkeeper_AFMethod2_metrics.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/bookkeeper_feature_correlation.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/bookkeeper_summary_results.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>

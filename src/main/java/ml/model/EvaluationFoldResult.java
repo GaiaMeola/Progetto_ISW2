@@ -1,12 +1,12 @@
 package ml.model;
 
 public class EvaluationFoldResult {
-    private String classifierName;
-    private boolean applyFS;
-    private boolean applySMOTE;
-    private int seed;
-    private int repeat;
-    private int fold;
+    private final String classifierName;
+    private final boolean applyFS;
+    private final boolean applySMOTE;
+    private final int seed;
+    private final int repeat;
+    private final int fold;
     private double accuracy;
     private double precision;
     private double recall;
@@ -62,10 +62,6 @@ public class EvaluationFoldResult {
         return precision;
     }
 
-    public void setPrecision(double precision) {
-        this.precision = precision;
-    }
-
     public double getRecall() {
         return recall;
     }
@@ -105,6 +101,8 @@ public class EvaluationFoldResult {
     public void setNpofb20(double npofb20) {
         this.npofb20 = npofb20;
     }
+
+    public void setPrecision(double v) { this.precision = v;}
 }
 
 

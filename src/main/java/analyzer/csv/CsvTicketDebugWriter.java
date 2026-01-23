@@ -1,11 +1,9 @@
 package analyzer.csv;
 
-import analyzer.model.TicketInfo;
 import util.Configuration;
 
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.Map;
 
 public class CsvTicketDebugWriter {
 
@@ -13,7 +11,7 @@ public class CsvTicketDebugWriter {
         // Utility class → no instances allowed
     }
 
-    public static void writeTicketCsv(String outputPath, Map<String, TicketInfo> tickets) {
+    public static void writeTicketCsv(String outputPath) {
         java.io.File file = new java.io.File(outputPath);
         java.io.File parent = file.getParentFile();
 

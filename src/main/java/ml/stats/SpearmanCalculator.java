@@ -19,7 +19,7 @@ import java.util.logging.Level;
 public class SpearmanCalculator {
 
     // Se true, lavora sul dataset ridotto (già sottoposto a feature selection)
-    private static final boolean REDUCTION = true;
+    private static final boolean REDUCTION = false;
 
     public static void main(String[] args) {
 

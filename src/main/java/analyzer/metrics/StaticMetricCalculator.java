@@ -8,7 +8,7 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.type.Type;
 
-// Questa classe calcola le metriche statiche per un emtodo Java
+// Questa classe calcola le metriche statiche per un metodo Java
 public class StaticMetricCalculator {
 
 

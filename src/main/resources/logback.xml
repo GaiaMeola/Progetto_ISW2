@@ -1,0 +1,5 @@
+<configuration>
+    <logger name="com.github.fommil.jni" level="OFF"/>
+    <logger name="com.github.fommil.netlib" level="OFF"/>
+
+</configuration>
