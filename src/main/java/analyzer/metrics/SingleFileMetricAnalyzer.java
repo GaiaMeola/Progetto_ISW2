@@ -11,50 +11,48 @@ import net.sourceforge.pmd.lang.LanguageVersion;
 import net.sourceforge.pmd.reporting.Report;
 import org.slf4j.LoggerFactory;
 import util.Configuration;
+import util.ProjectType;
 import java.io.File;
 import java.io.FileWriter;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.nio.file.Paths;
 import java.util.logging.Level;
 
-// Classe per ricalcolare le metriche su un singolo metodo che è stato rifattorizzato
 public class SingleFileMetricAnalyzer {
 
-    private static final String FILE_NAME = Configuration.SELECTED_PROJECT == util.ProjectType.BOOKKEEPER
-            ? "/home/denni/isw2/bookkeeper/bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/BenchReadThroughputLatency.java"
-            : "/home/denni/isw2/openjpa/openjpa-persistence/src/main/java/org/apache/openjpa/persistence/HintHandler.java";
+    // Costruiamo il percorso partendo dal project path configurato globalmente
+    private static final String FILE_NAME = Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER
+            ? Configuration.getProjectPath() + "/bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/BenchReadThroughputLatency.java"
+            : Configuration.getProjectPath() + "/openjpa-persistence/src/main/java/org/apache/openjpa/persistence/HintHandler.java";
 
-    private static final String OUTPUT_NAME = Configuration.SELECTED_PROJECT == util.ProjectType.BOOKKEEPER
+    // Output salvato nella cartella dei risultati definita nella config
+    private static final String OUTPUT_NAME = Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER
             ? "ml_results/bookkeeper_AFMethod2_metrics.csv"
             : "ml_results/openjpa_AFMethod2_metrics.csv";
 
     public static void main(String[] args) {
 
-        // Disabilita i log di PMD
+        // Setup Loggers
         ch.qos.logback.classic.Logger pmdLogger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("net.sourceforge.pmd");
         pmdLogger.setLevel(ch.qos.logback.classic.Level.ERROR);
-        // Disabilita log DEBUG di JGit
         ch.qos.logback.classic.Logger jgitLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("org.eclipse.jgit");
         jgitLogger.setLevel(ch.qos.logback.classic.Level.ERROR);
 
-        // Specifica il file Java da analizzare
         File javaFile = new File(FILE_NAME);
         if (!javaFile.exists()) {
+            Configuration.logger.severe("ERRORE: Il file specificato non esiste: " + FILE_NAME);
             return;
         }
 
         try {
-            // Il file Java viene parsato in una AST
             JavaParser parser = new JavaParser();
             CompilationUnit cu = parser.parse(javaFile).getResult().orElse(null);
             if (cu == null) return;
 
-            //  Estrazione metodi dal file
             List<MethodDeclaration> methods = cu.findAll(MethodDeclaration.class);
             if (methods.isEmpty()) return;
 
-            // Serve per calcolo delle metriche statiche
             StaticMetricCalculator staticCalc = new StaticMetricCalculator();
 
             // Configura PMD
@@ -70,20 +68,13 @@ public class SingleFileMetricAnalyzer {
                 Report report = pmd.performAnalysisAndCollectReport();
 
                 for (MethodDeclaration method : methods) {
-                    // Costruzione di ogni MethodInfo
                     MethodInfo info = new MethodInfo();
-                    info.setMethodName(javaFile.getAbsolutePath() + "/" + method.getNameAsString());
-                    info.setProjectName(Configuration.getProjectColumn());
-                    info.setReleaseId("AFMethod");
-                    info.setReleaseDate(null);
+                    info.setMethodName(method.getNameAsString());
 
                     int start = method.getBegin().map(p -> p.line).orElse(-1);
                     int end = method.getEnd().map(p -> p.line).orElse(-1);
 
-                    info.setStartLine(start);
-                    info.setEndLine(end);
-                    info.setMethodCode(method.toString());
-
+                    // Calcolo metriche
                     info.setLoc(staticCalc.calculateLoc(method));
                     info.setCyclomaticComplexity(staticCalc.calculateCyclomaticComplexity(method));
                     info.setCognitiveComplexity(staticCalc.calculateCognitiveComplexity(method));
@@ -93,6 +84,7 @@ public class SingleFileMetricAnalyzer {
                     info.setReturnTypeComplexity(staticCalc.calculateReturnTypeComplexity(method));
                     info.setLocalVariableCount(staticCalc.calculateLocalVariableCount(method));
 
+                    // Conteggio Smell nel range del metodo
                     List<String> smellNames = report.getViolations().stream()
                             .filter(v -> v.getBeginLine() >= start && v.getBeginLine() <= end)
                             .map(v -> v.getRule().getName())
@@ -100,13 +92,15 @@ public class SingleFileMetricAnalyzer {
 
                     info.setDetectedSmells(smellNames);
                     info.setNumberOfSmells(smellNames.size());
-                    info.setBugginess(false);
 
                     results.add(info);
                 }
             }
 
-            // Scrivi output CSV
+            // Assicuriamoci che la cartella ml_results esista
+            new File("ml_results").mkdirs();
+
+            // Scrittura CSV
             try (FileWriter fw = new FileWriter(OUTPUT_NAME)) {
                 fw.write("Method;LOC;Cyclomatic;Cognitive;ParameterCount;NestingDepth;StatementCount;ReturnTypeComplexity;LocalVarCount;Smells;SmellTypes\n");
                 for (MethodInfo m : results) {
@@ -117,10 +111,10 @@ public class SingleFileMetricAnalyzer {
                             String.join(";", m.getDetectedSmells())));
                 }
             }
+            Configuration.logger.info("Analisi singolo file completata. Output: " + OUTPUT_NAME);
 
         } catch (Exception e) {
-            Configuration.logger.log(Level.SEVERE, "Errore nel calcolo della correlazione Spearman", e);
+            Configuration.logger.log(Level.SEVERE, "Errore nel calcolo delle metriche del singolo file", e);
         }
     }
 }
-

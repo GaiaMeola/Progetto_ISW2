@@ -43,30 +43,32 @@ public class BugLinker {
 
     // Trova tutti i commit che contengono l’ID del ticket nel messaggio di commit
     public void linkCommitsToTickets(Map<String, TicketInfo> tickets) throws TicketLinkageException {
-
+        int totalLinks = 0;
         try {
-
-            // Per ogni ticket JIRA (già filtrato da TicketParser)
             for (Map.Entry<String, TicketInfo> entry : tickets.entrySet()) {
-                String ticketId = entry.getKey(); // ottieni id (es. BOOKKEEPER-123)
-                TicketInfo ticket = entry.getValue(); // ottieni info ticket
+                String ticketId = entry.getKey();
+                TicketInfo ticket = entry.getValue();
 
-                //  Cerca tutti i commit il cui messaggio contiene esattamente ticketId
+                // Usiamo una versione case-insensitive se possibile,
+                // altrimenti assicuriamoci che il messaggio sia normalizzato
                 Iterable<RevCommit> commits = repo.getCommitsByMessageContaining(ticketId);
 
                 for (RevCommit commit : commits) {
-
-                    // Collega commit al ticket
                     String commitHash = commit.getName();
-                    ticket.addCommitId(commitHash);
 
-                    // Salva i nomi dei file toccati nel commit nel TicketInfo
-                    Set<String> javaFiles = repo.getTouchedJavaFiles(commit);
-                    for (String file : javaFiles) {
-                        ticket.addFixedFile(file);
+                    // Evita duplicati
+                    if (!ticket.getCommitIds().contains(commitHash)) {
+                        ticket.addCommitId(commitHash);
+                        totalLinks++;
+
+                        Set<String> javaFiles = repo.getTouchedJavaFiles(commit);
+                        for (String file : javaFiles) {
+                            ticket.addFixedFile(file);
+                        }
                     }
                 }
             }
+            Configuration.logger.info("Linkage completato: " + totalLinks + " commit associati ai ticket tramite messaggio.");
         } catch (Exception e) {
             throw new TicketLinkageException("Errore durante il collegamento commit-ticket", e);
         }

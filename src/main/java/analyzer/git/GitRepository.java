@@ -14,7 +14,6 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.filter.CommitTimeRevFilter;
 import org.eclipse.jgit.revwalk.filter.MessageRevFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
-import util.Configuration;
 
 import java.io.File;
 import java.io.IOException;
@@ -118,9 +117,16 @@ public final class GitRepository {
     }
 
     // Esegue il checkout al commit indicato
-    public void checkoutCommit(RevCommit commit) throws GitAPIException {
-        if (Configuration.BASIC_DEBUG) Configuration.logger.info("Eseguo checkout al commit: " + commit.getName());
-        git.checkout().setName(commit.getName()).call();
+    public void checkoutCommit(RevCommit commit) throws GitOperationException {
+        try {
+            // Aggiungi .setForce(true) per ignorare i conflitti e pulire la cartella
+            git.checkout()
+                    .setName(commit.getName())
+                    .setForced(true)
+                    .call();
+        } catch (GitAPIException e) {
+            throw new GitOperationException("Errore durante il checkout del commit: " + commit.getName(), e);
+        }
     }
 
     // Chiude la connessione con il repository

@@ -94,15 +94,21 @@ public class BugLabeler {
 
     // Dato un nome metodo completo con l'intero path estrae solo la parte del file .java
     private static String extractFileFromMethodName(String methodName) {
-        int idx = methodName.lastIndexOf(".java");
-        if (idx != -1) {
-            String relative = methodName.substring(0, idx + 5);
-            if (relative.contains(Configuration.getProjectSubstring())) {
-                return relative.substring(relative.indexOf(Configuration.PROJECT1_SUBSTRING) + Configuration.PROJECT1_SUBSTRING.length());
-            }
-            return relative;
+        // Se il nome contiene il path completo, prendiamo solo la parte da 'org/apache/...' in poi
+        // o semplicemente normalizziamo eliminando i ../ iniziali
+        String cleaned = methodName;
+        if (methodName.contains(".java")) {
+            cleaned = methodName.substring(0, methodName.lastIndexOf(".java") + 5);
         }
-        return methodName;
+
+        // Rimuoviamo "../bookkeeper/" o percorsi simili se presenti
+        if (cleaned.contains("bookkeeper/")) {
+            cleaned = cleaned.substring(cleaned.indexOf("bookkeeper/") + 11);
+        } else if (cleaned.contains("openjpa/")) {
+            cleaned = cleaned.substring(cleaned.indexOf("openjpa/") + 8);
+        }
+
+        return cleaned.replace("\\", "/"); // Normalizza i separatori per Windows/Mac
     }
 
     // Registra nel ProportionEstimator tutti i ticket che hanno almeno una AV

@@ -183,7 +183,7 @@ public class MethodMetricsExtractor {
             info.setReturnTypeComplexity(staticCalc.calculateReturnTypeComplexity(method)); // Return Type Complexity
             info.setLocalVariableCount(staticCalc.calculateLocalVariableCount(method)); // Local Variable Count
 
-            // Target, per ora impstiamo sempre false
+            // Target, per ora impostiamo sempre false
             info.setBugginess(false);
 
             return info;
