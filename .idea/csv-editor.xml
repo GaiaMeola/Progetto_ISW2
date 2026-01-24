@@ -38,13 +38,6 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/ml_results/bookkeeper_AFMethod2_metrics.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value=";" />
-            </Attribute>
-          </value>
-        </entry>
         <entry key="/ml_results/bookkeeper_feature_correlation.csv">
           <value>
             <Attribute>

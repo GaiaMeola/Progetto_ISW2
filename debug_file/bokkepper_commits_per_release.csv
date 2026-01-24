@@ -1,0 +1,5 @@
+CommitID;Author;Date;Message
+1c90beb59a6aa94f18ca6b5ca1f94a0db5e0cc14;Ivan Brendan Kelly;2011-12-02T20:58:59;BOOKKEEPER-139: Binary packages do not carry NOTICE.txt (ivank)
+aa7f37c6095f61e89a290fc608fd14a50bc7b0e0;Ivan Brendan Kelly;2012-06-12T18:23:12;BOOKKEEPER-274: Hedwig cpp client library should not link to cppunit which is just used for test. (sijie via ivank)
+ec430abc550d8d1d66e9dd8dc3c096f44e666eeb;Ivan Brendan Kelly;2013-01-14T17:29:28;Fixup for CHANGES.txt (some issues were missing or wrongly placed, also removed tabs)
+455aabfd3b6ffd4247f6df63cb29d0694b359cdd;Ivan Brendan Kelly;2013-03-25T18:02:41;BOOKKEEPER-581: Ledger recovery doesn't work correctly when recovery adds force changing ensembles. (sijie via ivank)
