@@ -12,7 +12,7 @@ import java.util.Map;
 
 public class ProportionEstimator {
 
-    private static final int MIN_VALID_TICKETS = 5;
+    private static final int MIN_VALID_TICKETS = 10;
     private final Map<String, Release> releaseMap;
     private final ReleaseIndexMapper mapper;
     private final List<TicketInfo> validTicketsWithAV = new ArrayList<>();
