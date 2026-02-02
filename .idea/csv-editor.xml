@@ -59,6 +59,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/ml_results/bookkeeper_refactored_metrics.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/ml_results/bookkeeper_summary_results.csv">
           <value>
             <Attribute>
