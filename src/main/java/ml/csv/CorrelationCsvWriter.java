@@ -5,12 +5,13 @@ import util.Configuration;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.Locale;
 import java.util.logging.Level;
 
 public class CorrelationCsvWriter {
 
     private CorrelationCsvWriter(){
-        // Prevent instantation
+        // Prevent instantiation
     }
 
     private static final String HEADER = "Feature,Spearman,P-Value,Correlazione";
@@ -20,24 +21,30 @@ public class CorrelationCsvWriter {
             File file = new File(Configuration.getCorrelationCsvPath());
             boolean writeHeader = !file.exists();
 
-            FileWriter fw = new FileWriter(file, true);
+            // FileWriter in modalità append (true)
+            try (FileWriter fw = new FileWriter(file, true)) {
 
-            if (writeHeader) fw.write(HEADER + "\n");
+                if (writeHeader) {
+                    fw.write(HEADER + "\n");
+                }
 
-            String direction;
-            if (spearman > 0) {
-                direction = "positiva";
-            } else if (spearman < 0) {
-                direction = "negativa";
-            } else {
-                direction = "nessuna";
+                String direction;
+                if (spearman > 0) {
+                    direction = "positiva";
+                } else if (spearman < 0) {
+                    direction = "negativa";
+                } else {
+                    direction = "nessuna";
+                }
+
+                // Locale.US garantisce il punto decimale (0.1234 invece di 0,1234)
+                // Questo evita lo slittamento delle colonne nel CSV
+                fw.write(String.format(Locale.US, "%s,%.4f,%.12f,%s%n",
+                        feature, spearman, pValue, direction));
             }
 
-            fw.write(String.format("%s,%.4f,%.12f,%s%n", feature, spearman, pValue, direction));
-            fw.close();
-
             if (Configuration.logger.isLoggable(Level.INFO)) {
-                Configuration.logger.info("Correlazione scritta: " + feature + " → ρ=" + spearman + ", p=" + pValue);
+                Configuration.logger.info("Correlazione scritta: " + feature + " -> rho=" + spearman + ", p=" + pValue);
             }
 
         } catch (IOException e) {

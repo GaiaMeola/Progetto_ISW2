@@ -23,7 +23,8 @@ public class SingleFileMetricAnalyzer {
 
     // Costruiamo il percorso partendo dal project path configurato globalmente
     private static final String FILE_NAME = Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER
-            ? Configuration.getProjectPath() + "/bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/BenchReadThroughputLatency.java"
+            ? Configuration.getProjectPath() + "/bookkeeper-benchmark/src/main/java/org/apache/bookkeeper/benchmark/TestClient.java"
+            //metodo con più smells
             : Configuration.getProjectPath() + "/openjpa-persistence/src/main/java/org/apache/openjpa/persistence/HintHandler.java";
 
     // Output salvato nella cartella dei risultati definita nella config

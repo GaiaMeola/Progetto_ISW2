@@ -24,6 +24,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/debug_file/bookkeeper_ticket_commits.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/debug_file/bookkeeper_ticket_debug.csv">
           <value>
             <Attribute>
@@ -32,6 +39,13 @@
           </value>
         </entry>
         <entry key="/debug_file/bookkeeper_version_info.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/bookkeeper_AFMethod2_metrics.csv">
           <value>
             <Attribute>
               <option name="separator" value=";" />
