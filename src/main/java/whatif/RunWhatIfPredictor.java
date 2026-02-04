@@ -14,16 +14,10 @@ public class RunWhatIfPredictor {
 
             String project = Configuration.getProjectName().toLowerCase();
             String datasetAPath = Configuration.getOutputArffPath();
-            String datasetBplusPath = BASE_PATH + project + "_Bplus.csv";
-            String datasetBPath = BASE_PATH + project + "_B.csv";
-            String datasetCPath = BASE_PATH + project + "_C.csv";
             String outputSummaryCsv = BASE_PATH + project + "_summary.csv";
 
             WhatIfPredictor.runPrediction(
                     datasetAPath,
-                    datasetBplusPath,
-                    datasetBPath,
-                    datasetCPath,
                     outputSummaryCsv
             );
 

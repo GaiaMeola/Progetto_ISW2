@@ -17,6 +17,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/csv_output/fold_results_openjpa.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/debug_file/bokkepper_commits_per_release.csv">
           <value>
             <Attribute>
@@ -67,6 +74,48 @@
           </value>
         </entry>
         <entry key="/ml_results/bookkeeper_summary_results.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/openjpa_summary_results.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/whatif/bookkeeper_B.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/whatif/bookkeeper_Bplus.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/whatif/bookkeeper_C.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/whatif/bookkeeper_summary.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/whatif/openjpa_summary.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />

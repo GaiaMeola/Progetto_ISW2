@@ -3,65 +3,82 @@ package ml.arff;
 import util.Configuration;
 import weka.core.Attribute;
 import weka.core.Instances;
-import weka.core.converters.CSVLoader;
 import weka.core.converters.ArffSaver;
+import weka.core.converters.CSVLoader;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.logging.Level;
 
-// Questa classe si occupa della conversione da CSV a ARFF
 public class CSVToARFFConverter {
 
     public static void main(String[] args) throws Exception {
-        String csvPath = Configuration.getOutputCsvPath(); // Percorso del file CSV da convertire
-        String arffPath = Configuration.getOutputArffPath(); // Percorso del file ARFF di output
+        String csvPath = Configuration.getOutputCsvPath();
+        String arffPath = Configuration.getOutputArffPath();
 
-        // Inizializzazione del loader WEKA per il CSV
-        CSVLoader loader = new CSVLoader();
-        loader.setOptions(new String[]{"-F", ";"});
-        loader.setSource(new File(csvPath));
-        Instances data = loader.getDataSet();  // carica le istanze dal CSV
-
-        // Riordina le etichette
-        int classIndex = data.numAttributes() - 1; // ultima colonna bugginess
-        Attribute originalAttr = data.attribute(classIndex);
-
-        if (originalAttr.isNominal()
-                && originalAttr.numValues() == 2
-                && "Yes".equals(originalAttr.value(0))
-                && "No".equals(originalAttr.value(1))) {
-
-            if (Configuration.logger.isLoggable(Level.INFO))
-                Configuration.logger.info("Riordino etichette Bugginess: {Yes,No} → {No,Yes}");
-
-            ArrayList<String> reordered = new ArrayList<>();
-            reordered.add("No");
-            reordered.add("Yes");
-
-            // Creazione del nuovo attributo con le etichette ordinate
-            Attribute newAttr = new Attribute(originalAttr.name(), reordered);
-            Instances newData = new Instances(data);  // copia del dataset originale
-            newData.replaceAttributeAt(newAttr, classIndex); // sostituisce l'attributo
-
-            // Copia i valori di etichetta dalle istanze originali
-            for (int i = 0; i < newData.numInstances(); i++) {
-                String label = data.instance(i).stringValue(classIndex);
-                newData.instance(i).setValue(classIndex, label);
-            }
-
-            // Aggiorna il dataset finale
-            data = newData;
+        File csvFile = new File(csvPath);
+        if (!csvFile.exists()) {
+            throw new Exception("File CSV non trovato al percorso: " + csvPath);
         }
 
-        // Inizializza il salvataggio del file ARFF
+        // 1. Inizializzazione del loader WEKA con opzioni robuste
+        CSVLoader loader = new CSVLoader();
+
+        /* * Spiegazione opzioni:
+         * -F ";" : Specifica il punto e virgola come separatore
+         * -S "1,2" : Forza le prime due colonne (Project e Method) ad essere 'String'.
+         * Questo è FONDAMENTALE perché se contengono apici (') o virgole (,)
+         * Weka non proverà a interpretarle come categorie nominali, evitando crash.
+         */
+        loader.setOptions(new String[]{"-F", ";", "-S", "1,2"});
+        loader.setSource(csvFile);
+
+        Instances data = loader.getDataSet();
+
+        // LOG DI CONTROLLO: Verifica se ha letto tutte le colonne
+        Configuration.logger.info("Attributi rilevati nel CSV: " + data.numAttributes());
+        if (data.numAttributes() < 5) {
+            Configuration.logger.severe("ERRORE CRITICO: Weka ha letto troppe poche colonne (" +
+                    data.numAttributes() + "). Controlla se ci sono apici non chiusi nel CSV!");
+        }
+
+        // 2. Impostazione dell'indice della classe
+        if (data.classIndex() == -1) {
+            data.setClassIndex(data.numAttributes() - 1);
+        }
+
+        // 3. Riordino delle etichette Bugginess {No, Yes}
+        int classIndex = data.classIndex();
+        Attribute originalAttr = data.attribute(classIndex);
+
+        if (originalAttr.isNominal() && originalAttr.numValues() == 2) {
+            // Verifichiamo se l'ordine attuale è {Yes, No}
+            if ("Yes".equals(originalAttr.value(0)) && "No".equals(originalAttr.value(1))) {
+
+                Configuration.logger.info("Riordino etichette Bugginess: {Yes, No} → {No, Yes}");
+
+                ArrayList<String> reorderedValues = new ArrayList<>();
+                reorderedValues.add("No");
+                reorderedValues.add("Yes");
+
+                Attribute newAttr = new Attribute(originalAttr.name(), reorderedValues);
+                Instances newData = new Instances(data);
+                newData.replaceAttributeAt(newAttr, classIndex);
+
+                // Migrazione dei valori riga per riga
+                for (int i = 0; i < data.numInstances(); i++) {
+                    String label = data.instance(i).stringValue(classIndex);
+                    newData.instance(i).setValue(classIndex, label);
+                }
+                data = newData;
+            }
+        }
+
+        // 4. Salvataggio finale in ARFF
         ArffSaver saver = new ArffSaver();
         saver.setInstances(data);
         saver.setFile(new File(arffPath));
-        saver.writeBatch(); // esegue il salvataggio fisico del file
+        saver.writeBatch();
 
-        if (Configuration.logger.isLoggable(Level.INFO)) {
-            Configuration.logger.info(String.format("Conversione completata: path = %s", arffPath));
-        }
+        Configuration.logger.info("Conversione completata con successo: " + arffPath);
     }
 }

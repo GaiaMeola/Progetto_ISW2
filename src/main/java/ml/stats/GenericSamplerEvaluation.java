@@ -12,8 +12,6 @@ import weka.core.Instances;
 import weka.core.Utils;
 import weka.core.converters.ConverterUtils.DataSource;
 
-import java.io.FileWriter;
-import java.io.PrintWriter;
 import java.util.Random;
 import java.util.logging.Level;
 
@@ -21,13 +19,15 @@ import static ml.evaluation.CrossValidator.evaluateAndWrap;
 
 public class GenericSamplerEvaluation {
 
-    private static final int SAMPLE_SIZE = 20000;
+    private static final int SAMPLE_SIZE = 40000;
 
     public static void main(String[] args) {
         try {
-            String classifierName = args.length > 0 ? args[0] : "IBk";
+            // --- CONFIGURAZIONE MANUALE ---
+            // Imposta a true per bilanciare (Kappa alto), false per distribuzione reale (Kappa 0.2-0.4)
+            boolean useUnderSampling = false;
             boolean applyFeatureSelection = false;
-            boolean applySmote = true;
+            // ------------------------------
 
             String project = Configuration.SELECTED_PROJECT.toString().toLowerCase();
             if (!project.equals("openjpa")) {
@@ -37,31 +37,43 @@ public class GenericSamplerEvaluation {
 
             DataSource source = new DataSource("csv_output/" + project + "_output.arff");
             Instances data = source.getDataSet();
-            if (data.classIndex() == -1) {
-                data.setClassIndex(data.numAttributes() - 1);
+            if (data.classIndex() == -1) data.setClassIndex(data.numAttributes() - 1);
+
+            String[] classifiersToTest = {"ibk", "naivebayes", "randomforest"};
+
+            for (String name : classifiersToTest) {
+                String strategyLog = useUnderSampling ? "CON Under-sampling" : "SENZA Under-sampling";
+                Configuration.logger.info("\n>>> AVVIO: " + name + " su OpenJPA " + strategyLog);
+
+                // Selezione del sample iniziale (20.000 istanze)
+                int sampleSize = Math.min(SAMPLE_SIZE, data.numInstances());
+                Instances currentData = new Instances(data, 0, sampleSize);
+
+                // LOGICA DI BILANCIAMENTO CONDIZIONALE
+                if (useUnderSampling) {
+                    currentData = balanceDataset(currentData);
+                    Configuration.logger.info("Bilanciamento applicato. Istanze finali: " + currentData.numInstances());
+                } else {
+                    Configuration.logger.info("Esecuzione su dati originali. Istanze finali: " + currentData.numInstances());
+                }
+
+                Classifier classifier = createClassifier(name);
+
+                // Il runName riflette la scelta per distinguere i file di output
+                String runName = String.format("%s_FS=%s_US=%s", name, applyFeatureSelection, useUnderSampling);
+
+                // ESECUZIONE 10-times 10-fold Cross Validation
+                // SMOTE è impostato a false perché o usiamo l'Under-sampling (US=true) o nulla
+                EvaluationResult result = evaluateAndWrap(runName, classifier, currentData, 10, 10, applyFeatureSelection, false);
+
+                EvaluationCsvWriter.write(Configuration.getProjectColumn(), result);
+                Configuration.logger.info(">>> COMPLETATO: " + name);
             }
 
-            int sampleSize = Math.min(SAMPLE_SIZE, data.numInstances());
-            Instances sample = new Instances(data, 0, sampleSize);
-            Configuration.logger.info("Dataset campionato temporalmente (" + sample.numInstances() + " istanze)");
-
-            if (applySmote) {
-                sample = balanceDataset(sample);
-            }
-
-            Classifier classifier = createClassifier(classifierName);
-            String runName = String.format("%s_FS=%s_SMOTE=%s", classifier.getClass().getSimpleName(), applyFeatureSelection, applySmote);
-
-            // Scrivi intestazione se necessario
-            try (PrintWriter pw = new PrintWriter(new FileWriter("csv_output/fold_results_openjpa.csv"))) {
-                pw.println("Classifier,FS,SMOTE,Seed,Repeat,Fold,Accuracy,Precision,Recall,F1,AUC,Kappa,NPofB20");
-            }
-
-            EvaluationResult result = evaluateAndWrap(runName, classifier, sample, 10, 10, applyFeatureSelection, applySmote);
-            EvaluationCsvWriter.write(Configuration.getProjectColumn(), result);
+            Configuration.logger.info("ESECUZIONE TERMINATA. Risultati salvati.");
 
         } catch (Exception e) {
-            Configuration.logger.log(Level.SEVERE, "Errore durante la valutazione campionata", e);
+            Configuration.logger.log(Level.SEVERE, "Errore critico nel main", e);
         }
     }
 
@@ -78,7 +90,7 @@ public class GenericSamplerEvaluation {
             }
         }
 
-        Random rand = new Random(42); // NOSONAR: riproducibilità esperimenti
+        Random rand = new Random(42);
         negatives.randomize(rand);
 
         int limit = Math.min(positives.numInstances(), negatives.numInstances());
@@ -94,17 +106,16 @@ public class GenericSamplerEvaluation {
         switch (name.toLowerCase()) {
             case "ibk":
                 return new IBk(3);
-            case "naive":
+            case "naivebayes":
                 return new NaiveBayes();
             case "randomforest":
                 RandomForest rf = new RandomForest();
-                String[] options = Utils.splitOptions("-I 30 -depth 12 -M 50 -K 0 -S 1 -num-slots 1");
-                rf.setOptions(options);
+                // Parametri ottimizzati per stabilità e velocità
+                rf.setOptions(Utils.splitOptions("-I 30 -depth 12 -M 50 -K 0 -S 1 -num-slots 1"));
                 rf.setBagSizePercent(40);
-                Configuration.logger.info("RandomForest configurato con 30 alberi, profondità max 12");
                 return rf;
             default:
-                throw new IllegalArgumentException("Classificatore non riconosciuto: " + name);
+                throw new IllegalArgumentException("Classificatore non supportato: " + name);
         }
     }
 }

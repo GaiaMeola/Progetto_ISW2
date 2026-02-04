@@ -21,7 +21,7 @@ public class ClassifierFactory {
 
     public static Classifier getRandomForest() {
         RandomForest rf = new RandomForest();
-        rf.setNumIterations(30);
+        rf.setNumIterations(100);
         rf.setNumExecutionSlots(Runtime.getRuntime().availableProcessors());
         rf.setSeed(42);
         return rf;

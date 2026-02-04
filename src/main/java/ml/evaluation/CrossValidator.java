@@ -27,11 +27,20 @@ public class CrossValidator {
                                                    boolean applyFeatureSelection,
                                                    boolean applySmote) throws Exception {
 
-        // 1. Rimozione ReleaseID preventiva (evita data leakage globale)
-        int releaseIdIndex = data.attribute("ReleaseID") != null ? data.attribute("ReleaseID").index() : -1;
-        if (releaseIdIndex != -1) {
+        // 1. Pulizia Globale: Rimuovi Project, Method e ReleaseID
+        // È fondamentale che il modello non veda mai questi attributi
+        String[] attributesToRemove = {"Project", "Method", "ReleaseID"};
+        List<Integer> indices = new ArrayList<>();
+        for (String attrName : attributesToRemove) {
+            if (data.attribute(attrName) != null) {
+                indices.add(data.attribute(attrName).index());
+            }
+        }
+
+        if (!indices.isEmpty()) {
             Remove remove = new Remove();
-            remove.setAttributeIndicesArray(new int[]{releaseIdIndex});
+            int[] arrIndices = indices.stream().mapToInt(j -> j).toArray();
+            remove.setAttributeIndicesArray(arrIndices);
             remove.setInputFormat(data);
             data = Filter.useFilter(data, remove);
         }
