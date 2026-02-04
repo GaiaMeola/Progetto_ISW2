@@ -38,53 +38,32 @@ public class WhatIfPredictor {
         Instances datasetA = preprocess(datasetRaw);
         datasetA = reorderBugginessValues(datasetA);
 
-        if (Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER) {
-            datasetA = filterActionableFeatures(datasetA);
-        }
+        final Instances modelHeader = new Instances(datasetA, 0);
 
-        // Questo garantisce che B+ e C abbiano lo STESSO IDENTICO header di A
-        Instances datasetBplus = new Instances(datasetA, 0);
-        Instances datasetC = new Instances(datasetA, 0);
+        Instances datasetBplus = new Instances(modelHeader, 0);
+        Instances datasetC = new Instances(modelHeader, 0);
 
-        // Usiamo una logica di partizionamento basata sullo stato originale
-        // Nota: devi assicurarti che l'indice di "Number of Smells" sia corretto nel datasetRaw
-        int smellIdx = datasetRaw.attribute("Number of Smells").index();
+        // Recuperiamo l'indice degli smell dal datasetRaw (struttura originale)
+        int smellIdxRaw = datasetRaw.attribute("Number of Smells").index();
+        int smellIdxHeader = modelHeader.attribute("Number of Smells").index();
+
         for (int i = 0; i < datasetA.numInstances(); i++) {
-            // Se nel dataset originale la riga i-esima aveva smells > 0
-            if (datasetRaw.instance(i).value(smellIdx) > 0) {
-                datasetBplus.add(datasetA.instance(i)); // Qui finiscono quelli CON smells
+            // La logica di divisione segue il valore reale originale
+            if (datasetRaw.instance(i).value(smellIdxRaw) > 0) {
+                datasetBplus.add(datasetA.instance(i));
             } else {
-                datasetC.add(datasetA.instance(i));    // Qui finiscono quelli SENZA smells
+                datasetC.add(datasetA.instance(i));
             }
         }
 
         // 4. CREAZIONE DATASET B (What-If)
         Instances datasetB = new Instances(datasetBplus);
-        int smellIdxA = datasetB.attribute("Number of Smells").index();
-
         for (int i = 0; i < datasetB.numInstances(); i++) {
-            Instance inst = datasetB.instance(i);
-            double valueBefore = inst.value(smellIdxA);
-            inst.setValue(smellIdxA, 0);
-
-            // DEBUG: Verifica che il valore sia effettivamente cambiato e che l'indice sia giusto
-            if (i == 0) {
-                System.out.println("DEBUG ATTRIBUTO: " + datasetB.attribute(smellIdxA).name());
-                System.out.println("DEBUG VALORE: Prima=" + valueBefore + " Dopo=" + inst.value(smellIdxA));
-            }
+            datasetB.instance(i).setValue(smellIdxHeader, 0);
         }
 
         // 5. TRAINING (Usiamo una copia per lo SMOTE, lasciando datasetA intatto per il test)
         Instances datasetTrain = new Instances(datasetA);
-        if (Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER) {
-            for (int i = 0; i < datasetTrain.numInstances(); i++) {
-                if (datasetTrain.instance(i).value(smellIdxA) > 0) {
-                    datasetTrain.instance(i).setWeight(20.0); // Peso 20x
-                }
-            }
-            // Nota: applySMOTE è a 0% o rimosso per evitare conflitti con i pesi
-        }
-
         if (Configuration.SELECTED_PROJECT == ProjectType.OPENJPA) {
             datasetTrain = downsample(datasetTrain);
         } else if (Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER) {
@@ -94,11 +73,10 @@ public class WhatIfPredictor {
         // 6. COSTRUZIONE MODELLO
         Classifier model = buildClassifier(datasetTrain);
 
-        // 7. PREDIZIONI (Ora la precisione è garantita perché B+, B e C sono "figli" di A)
-        PredictionSummary summaryA = predict("A", datasetA, model);
-        PredictionSummary summaryBplus = predict("B+", datasetBplus, model);
-        PredictionSummary summaryB = predict("B", datasetB, model);
-        PredictionSummary summaryC = predict("C", datasetC, model);
+        PredictionSummary summaryA = predict("A", datasetA, model, modelHeader);
+        PredictionSummary summaryBplus = predict("B+", datasetBplus, model, modelHeader);
+        PredictionSummary summaryB = predict("B", datasetB, model, modelHeader);
+        PredictionSummary summaryC = predict("C", datasetC, model, modelHeader);
 
         // VERIFICA IN CONSOLE
         System.out.println("--- CHECK MATEMATICO ---");
@@ -174,43 +152,41 @@ public class WhatIfPredictor {
 
     // Costruisce il classificatore (RandomForest o IBk) in base al progetto.
     private static Classifier buildClassifier(Instances trainData) throws Exception {
-        RandomForest rf = new RandomForest();
         if (Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER) {
-            // Aumentiamo il numero di alberi per dare stabilità
-            rf.setNumIterations(200);
-            rf.setNumFeatures(0);     // Forza l'uso di tutte le feature in ogni split se necessario
+            weka.classifiers.bayes.NaiveBayes nb = new weka.classifiers.bayes.NaiveBayes();
+            nb.buildClassifier(trainData);
+            return nb;
         } else {
+            RandomForest rf = new RandomForest();
             String[] options = Utils.splitOptions("-I 30 -depth 12 -K 0 -S 1 -num-slots 1 -M 50");
             rf.setOptions(options);
             rf.setBagSizePercent(50);
+            rf.buildClassifier(trainData);
+            return rf;
         }
-        rf.buildClassifier(trainData);
-        return rf;
     }
 
-    // Applica una predizione su un dataset e conta i veri/predetti buggy
-    private static PredictionSummary predict(String name, Instances data, Classifier model) throws Exception {
+    // METODO PREDICT CON ALLINEAMENTO DATASET
+    private static PredictionSummary predict(String name, Instances data, Classifier model, Instances header) throws Exception {
         int actualBuggy = 0;
         int predictedBuggy = 0;
 
-        // Recuperiamo l'indice del valore "yes" dinamicamente
-        Attribute classAttr = data.classAttribute();
+        for (int i = 0; i < data.numInstances(); i++) {
+            Instance inst = data.instance(i);
 
-        for (Instance instance : data) {
-            // Valore reale
-            if (instance.stringValue(classAttr).equalsIgnoreCase("yes")) {
+            // Conteggio reali (usando l'indice della classe del dataset corrente)
+            if (inst.stringValue(inst.classIndex()).equalsIgnoreCase("yes")) {
                 actualBuggy++;
             }
 
-            // Valore predetto
-            double predictionIndex = model.classifyInstance(instance);
-            String predictionLabel = classAttr.value((int) predictionIndex);
+            inst.setDataset(header);
+            double pred = model.classifyInstance(inst);
+            String label = header.classAttribute().value((int) pred);
 
-            if (predictionLabel.equalsIgnoreCase("yes")) {
+            if (label.equalsIgnoreCase("yes")) {
                 predictedBuggy++;
             }
         }
-
         return new PredictionSummary(name, actualBuggy, predictedBuggy);
     }
 
@@ -271,31 +247,6 @@ public class WhatIfPredictor {
         // Imposta la nuova classe
         data.setClassIndex(data.numAttributes() - 1);
         return data;
-    }
-
-    /**
-     * Metodo di supporto per tenere solo le feature "azionabili".
-     * Riducendo il numero di colonne, la Random Forest è obbligata a usare gli Smell.
-     */
-    private static Instances filterActionableFeatures(Instances data) throws Exception {
-        List<String> actionable = Arrays.asList(
-                "Number of Smells", "LOC", "CycloComplexity", "CognitiveComplexity", "Bugginess"
-        );
-
-        StringBuilder indices = new StringBuilder();
-        for (int i = 0; i < data.numAttributes(); i++) {
-            String name = data.attribute(i).name();
-            if (actionable.contains(name)) {
-                if (!indices.isEmpty()) indices.append(",");
-                indices.append(i + 1);
-            }
-        }
-
-        weka.filters.unsupervised.attribute.Remove remove = new weka.filters.unsupervised.attribute.Remove();
-        remove.setAttributeIndices(indices.toString());
-        remove.setInvertSelection(true);
-        remove.setInputFormat(data);
-        return Filter.useFilter(data, remove);
     }
 
 }
