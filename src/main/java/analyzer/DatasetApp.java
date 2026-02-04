@@ -27,7 +27,7 @@ public class DatasetApp {
 
     /*
     Questa classe contiene il metodo main che va a gestire il flusso di esecuzione
-    necessario a realizzare la milestone 1, quindi a creare i dataset richiesti
+    necessario a realizzare la milestone 1, quindi ha creare i dataset richiesti
     */
 
 
@@ -50,7 +50,7 @@ public class DatasetApp {
             // Recupera primo 33% release del progetto
             List<Release> datasetReleases = GetReleaseInfo.getDatasetReleases();
 
-            // Mappa per associare le date delle release agli ID
+            // Mappa per asscoaire le date delle release agli ID
             Map<String, LocalDate> releaseDatesById = new HashMap<>();
             for (Release r : datasetReleases) {
                 releaseDatesById.put(r.getName(), r.getReleaseDate());
@@ -139,7 +139,7 @@ public class DatasetApp {
 
         } catch (Exception e) {
             Configuration.logger.info("Errore durante l'esecuzione.");
-            e.printStackTrace();
+            e.printStackTrace(); // <--- Aggiungi questo
         }
     }
 }

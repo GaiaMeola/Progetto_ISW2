@@ -11,9 +11,10 @@ import org.json.JSONObject;
 import util.Configuration;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
@@ -33,12 +34,6 @@ public class TicketParser {
             int maxResults = 1000;
             int total = 1;
 
-            /*
-               Query JIRA --> scarica solo ticket con:
-              type = Bug
-              status ∈ {Resolved, Closed}
-              resolution = Fixed
-            */
             while (startAt < total) {
 
                 // Chiamata http effettiva
@@ -152,7 +147,7 @@ public class TicketParser {
 
     //  Ritorna il corpo della risposta della chiamata http a JIRA convertito in un oggetto JSONObject
     private static JSONObject readJsonFromUrl(String url) throws JsonDownloadException {
-        try (InputStream is = URI.create(url).toURL().openStream();
+        try (InputStream is = new URL(url).openStream();
              BufferedReader rd = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
 
             StringBuilder sb = new StringBuilder();
@@ -163,7 +158,7 @@ public class TicketParser {
 
             return new JSONObject(sb.toString());
 
-        } catch (Exception e) { // Catturiamo Exception generica per gestire URI e IO
+        } catch (RuntimeException | IOException e) {
             throw new JsonDownloadException("Errore nel download o parsing del JSON da URL: " + url, e);
         }
     }
@@ -205,29 +200,29 @@ public class TicketParser {
 
         try{List<Release> releases = new ArrayList<>();
 
-        String url = "https://issues.apache.org/jira/rest/api/2/project/" + projectKey;
-        JSONObject json = readJsonFromUrl(url);
-        JSONArray versions = json.getJSONArray(VERSIONS_STRING);
+            String url = "https://issues.apache.org/jira/rest/api/2/project/" + projectKey;
+            JSONObject json = readJsonFromUrl(url);
+            JSONArray versions = json.getJSONArray(VERSIONS_STRING);
 
-        for (int i = 0; i < versions.length(); i++) {
-            JSONObject version = versions.getJSONObject(i);
-            if (version.has(RELEASE_DATE_STRING) && version.has("released") && version.getBoolean("released")) {
-                Release r = new Release();
-                String name = version.optString("name", "unknown");
-                if (!name.matches(CORRECT_NAME)) {
-                    continue;
+            for (int i = 0; i < versions.length(); i++) {
+                JSONObject version = versions.getJSONObject(i);
+                if (version.has(RELEASE_DATE_STRING) && version.has("released") && version.getBoolean("released")) {
+                    Release r = new Release();
+                    String name = version.optString("name", "unknown");
+                    if (!name.matches(CORRECT_NAME)) {
+                        continue;
+                    }
+                    r.setName(name);
+                    r.setId(version.optString("id", "0"));
+                    r.setReleaseDate(LocalDate.parse(version.getString(RELEASE_DATE_STRING)));
+                    r.setReleased(true);
+                    releases.add(r);
                 }
-                r.setName(name);
-                r.setId(version.optString("id", "0"));
-                r.setReleaseDate(LocalDate.parse(version.getString(RELEASE_DATE_STRING)));
-                r.setReleased(true);
-                releases.add(r);
             }
-        }
 
-        // Ordina le release per data
-        releases.sort(Comparator.comparing(Release::getReleaseDate));
-        return releases;} catch (RuntimeException e) {
+            // Ordina le release per data
+            releases.sort(Comparator.comparing(Release::getReleaseDate));
+            return releases;} catch (RuntimeException e) {
             throw new JiraReleaseException("Errore recupero release da JIRA", e);
         }
     }
@@ -235,6 +230,7 @@ public class TicketParser {
 
     public static void main(String[] args) throws Exception {
         Map<String, TicketInfo> tickets = parseTicketsFromJira();
-        CsvTicketDebugWriter.writeTicketCsv(Configuration.getDebugTicketPath());
+        CsvTicketDebugWriter.writeTicketCsv(Configuration.getDebugTicketPath(), tickets);
     }
 }
+

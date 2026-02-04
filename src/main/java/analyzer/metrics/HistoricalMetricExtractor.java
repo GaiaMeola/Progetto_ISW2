@@ -177,7 +177,5 @@ public class HistoricalMetricExtractor {
             stats.addEdit(added, deleted, current.getAuthorIdent().getName());
         }
     }
-
-
-
 }
+

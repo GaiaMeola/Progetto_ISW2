@@ -6,7 +6,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.*;
-import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -169,12 +169,8 @@ public class GetReleaseInfo {
     }
 
     // Effettua richiesta HTTP e converte in JSONObject il risultato ottenuto
-
-// ... resto della classe ...
-
     private static JSONObject readJsonFromUrl(String url) throws IOException, JSONException {
-
-        InputStream is = URI.create(url).toURL().openStream();
+        InputStream is = new URL(url).openStream();
         try (BufferedReader rd = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             StringBuilder sb = new StringBuilder();
             int cp;
@@ -186,4 +182,5 @@ public class GetReleaseInfo {
     }
 
 }
+
 

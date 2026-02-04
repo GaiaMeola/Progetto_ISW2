@@ -16,7 +16,7 @@ public class BugLabeler {
     Questa classe:
     - per ogni ticket bug stima le versioni buggy
     - identifica i file toccati dai commit associati al ticket
-    - verifica i metodi toccati per etichettarli come buggy nelle versioni corrette
+    - verifica i metodi toccati èer etichettarli come buggy nelle versioni corrette
      */
 
     private static final String TICKET_PREFIX = "Ticket ";
@@ -82,33 +82,43 @@ public class BugLabeler {
     }
 
     // Raggruppa i metodi per file e release
+//    private static Map<String, List<MethodInfo>> groupMethodsByFileAndRelease(List<MethodInfo> methods) {
+//        Map<String, List<MethodInfo>> map = new HashMap<>();
+//        for (MethodInfo m : methods) {
+//            String filePath = extractFileFromMethodName(m.getMethodName());
+//            String key = filePath + "@" + m.getReleaseId(); // key: filePath@releaseId
+//            map.computeIfAbsent(key, k -> new ArrayList<>()).add(m); // value: lista dei metodi in quel file per quella release
+//        }
+//        return map;
+//    }
+
     private static Map<String, List<MethodInfo>> groupMethodsByFileAndRelease(List<MethodInfo> methods) {
         Map<String, List<MethodInfo>> map = new HashMap<>();
         for (MethodInfo m : methods) {
             String filePath = extractFileFromMethodName(m.getMethodName());
-            String key = filePath + "@" + m.getReleaseId(); // key: filePath@releaseId
-            map.computeIfAbsent(key, k -> new ArrayList<>()).add(m); // value: lista dei metodi in quel file per quella release
+            String key = filePath + "@" + m.getReleaseId();
+
+            // DEBUG: Vediamo i primi 5 file caricati per capire il formato
+            if (map.size() < 5 && Configuration.LABELING_DEBUG) {
+                Configuration.logger.info("[DEBUG-PATH] Esempio chiave in mappa: " + key);
+            }
+
+            map.computeIfAbsent(key, k -> new ArrayList<>()).add(m);
         }
         return map;
     }
 
     // Dato un nome metodo completo con l'intero path estrae solo la parte del file .java
     private static String extractFileFromMethodName(String methodName) {
-        // Se il nome contiene il path completo, prendiamo solo la parte da 'org/apache/...' in poi
-        // o semplicemente normalizziamo eliminando i ../ iniziali
-        String cleaned = methodName;
-        if (methodName.contains(".java")) {
-            cleaned = methodName.substring(0, methodName.lastIndexOf(".java") + 5);
+        int idx = methodName.lastIndexOf(".java");
+        if (idx != -1) {
+            String relative = methodName.substring(0, idx + 5);
+            if (relative.contains(Configuration.getProjectSubstring())) {
+                return relative.substring(relative.indexOf(Configuration.PROJECT1_SUBSTRING) + Configuration.PROJECT1_SUBSTRING.length());
+            }
+            return relative;
         }
-
-        // Rimuoviamo "../bookkeeper/" o percorsi simili se presenti
-        if (cleaned.contains("bookkeeper/")) {
-            cleaned = cleaned.substring(cleaned.indexOf("bookkeeper/") + 11);
-        } else if (cleaned.contains("openjpa/")) {
-            cleaned = cleaned.substring(cleaned.indexOf("openjpa/") + 8);
-        }
-
-        return cleaned.replace("\\", "/"); // Normalizza i separatori per Windows/Mac
+        return methodName;
     }
 
     // Registra nel ProportionEstimator tutti i ticket che hanno almeno una AV
@@ -222,6 +232,42 @@ public class BugLabeler {
     - Se sì, individua i metodi toccati in quel file
     - Etichetta quei metodi come buggy
      */
+//    private static int[] processTicketCommits(
+//            TicketInfo ticket,
+//            GitRepository repo,
+//            Set<String> buggyReleases,
+//            Map<String, List<MethodInfo>> methodsByFileAndRelease,
+//            MethodTouchAnalyzer analyzer,
+//            List<String[]> debugRows
+//    ) {
+//        int[] counters = new int[]{0, 0}; // counters[0] = buggyFromAV, counters[1] = buggyFromProportion
+//
+//        // Scorre tutti i commit legati al ticket
+//        for (String commitHash : ticket.getCommitIds()) {
+//            RevCommit commit = resolveCommit(commitHash, repo); // Lo risolve (resolveCommit) da hash a RevCommit
+//            if (commit == null) continue; // Se fallisce, lo salta
+//
+//            Set<String> files = new HashSet<>(ticket.getFixedFiles());
+//
+//            //  Per ogni file toccato dal commit
+//            for (String filePath : files) {
+//                for (String releaseId : buggyReleases) { // E per ogni release considerata "buggy"
+//                    String key = filePath + "@" + releaseId; // Costruisce la chiave file@release per accedere alla lista di metodi corrispondenti
+//                    if (!methodsByFileAndRelease.containsKey(key)) continue;
+//
+//                    // Trova i metodi modificati
+//                    List<MethodInfo> candidates = methodsByFileAndRelease.get(key);
+//                    Set<MethodInfo> touched = analyzer.getTouchedMethods(commit, filePath, candidates);
+//
+//                    // Etichetta i metodi toccati
+//                    processTouchedMethods(touched, ticket, commit, debugRows, counters);
+//                }
+//            }
+//        }
+//
+//        return counters;
+//    }
+
     private static int[] processTicketCommits(
             TicketInfo ticket,
             GitRepository repo,
@@ -230,31 +276,37 @@ public class BugLabeler {
             MethodTouchAnalyzer analyzer,
             List<String[]> debugRows
     ) {
-        int[] counters = new int[]{0, 0}; // counters[0] = buggyFromAV, counters[1] = buggyFromProportion
+        int[] counters = new int[]{0, 0};
 
-        // Scorre tutti i commit legati al ticket
         for (String commitHash : ticket.getCommitIds()) {
-            RevCommit commit = resolveCommit(commitHash, repo); // Lo risolve (resolveCommit) da hash a RevCommit
-            if (commit == null) continue; // Se fallisce, lo salta
+            RevCommit commit = resolveCommit(commitHash, repo);
+            if (commit == null) continue;
 
-            Set<String> files = new HashSet<>(ticket.getFixedFiles());
+            for (String filePath : ticket.getFixedFiles()) {
+                for (String releaseId : buggyReleases) {
+                    String key = filePath + "@" + releaseId;
 
-            //  Per ogni file toccato dal commit
-            for (String filePath : files) {
-                for (String releaseId : buggyReleases) { // E per ogni release considerata "buggy"
-                    String key = filePath + "@" + releaseId; // Costruisce la chiave file@release per accedere alla lista di metodi corrispondenti
-                    if (!methodsByFileAndRelease.containsKey(key)) continue;
+                    if (!methodsByFileAndRelease.containsKey(key)) {
+                        if (Configuration.LABELING_DEBUG) {
+                            // Questo log ti dirà se Git sta cercando "modulo/src/File.java"
+                            // ma tu hai salvato solo "src/File.java"
+                            Configuration.logger.warning("[DEBUG-MATCH-FAIL] Ticket " + ticket.getId() +
+                                    " cercava: " + key + " ma non esiste nel dataset!");
+                        }
+                        continue;
+                    }
 
-                    // Trova i metodi modificati
                     List<MethodInfo> candidates = methodsByFileAndRelease.get(key);
                     Set<MethodInfo> touched = analyzer.getTouchedMethods(commit, filePath, candidates);
 
-                    // Etichetta i metodi toccati
+                    if (touched.isEmpty() && Configuration.LABELING_DEBUG) {
+                        Configuration.logger.info("[DEBUG-TOUCH] File trovato, ma nessun metodo toccato nel commit per: " + key);
+                    }
+
                     processTouchedMethods(touched, ticket, commit, debugRows, counters);
                 }
             }
         }
-
         return counters;
     }
 
@@ -310,3 +362,4 @@ public class BugLabeler {
     }
 
 }
+

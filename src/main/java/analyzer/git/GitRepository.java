@@ -3,10 +3,11 @@ package analyzer.git;
 import analyzer.exception.GitOperationException;
 import analyzer.model.TicketInfo;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
@@ -14,6 +15,7 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.filter.CommitTimeRevFilter;
 import org.eclipse.jgit.revwalk.filter.MessageRevFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
+import util.Configuration;
 
 import java.io.File;
 import java.io.IOException;
@@ -85,48 +87,41 @@ public final class GitRepository {
 
     // Trova l'ultimo commit prima della data di una release
     public RevCommit findLastCommitBefore(LocalDate releaseDate) throws IOException {
+
         Date targetDate = java.sql.Date.valueOf(releaseDate);
 
         try (RevWalk walk = new RevWalk(repo)) {
-            // CERCA MASTER O MAIN INVECE DI HEAD
-            ObjectId rootId = repo.resolve("refs/heads/master");
-            if (rootId == null) {
-                rootId = repo.resolve("refs/heads/main");
+            // Forza l'inizio da origin/master per evitare problemi di branch locali
+            Ref master = repo.findRef("refs/remotes/origin/master");
+            if (master == null) {
+                throw new IOException("Impossibile trovare origin/master");
             }
-
-            // Se non trova né master né main, usa l'HEAD corrente come ultima spiaggia
-            if (rootId == null) {
-                rootId = repo.resolve("HEAD");
-            }
-
-            if (rootId == null) {
-                throw new IOException("Impossibile trovare un punto di partenza per il RevWalk.");
-            }
-
-            walk.markStart(walk.parseCommit(rootId));
-            walk.sort(RevSort.COMMIT_TIME_DESC);
+            walk.markStart(walk.parseCommit(master.getObjectId()));
+            walk.sort(RevSort.COMMIT_TIME_DESC); // Ordina dal più recente al più vecchio
 
             for (RevCommit commit : walk) {
-                Date commitDate = commit.getAuthorIdent().getWhen();
-                if (commitDate.before(targetDate)) {
-                    return commit;
+                Date commitDate = commit.getAuthorIdent().getWhen(); // Estrae la data del commit
+                if (commitDate.before(targetDate)) { // Se è prima della data della release
+                    return commit; // Trovato il commit valido
                 }
             }
         }
-        return null;
+
+        return null; // Nessun commit trovato prima della release
     }
 
     // Esegue il checkout al commit indicato
-    public void checkoutCommit(RevCommit commit) throws GitOperationException {
-        try {
-            // Aggiungi .setForce(true) per ignorare i conflitti e pulire la cartella
-            git.checkout()
-                    .setName(commit.getName())
-                    .setForced(true)
-                    .call();
-        } catch (GitAPIException e) {
-            throw new GitOperationException("Errore durante il checkout del commit: " + commit.getName(), e);
-        }
+    public void checkoutCommit(RevCommit commit) throws GitAPIException {
+        // 1. Forza il reset dello stato attuale per eliminare ogni conflitto
+        git.reset()
+                .setMode(ResetCommand.ResetType.HARD)
+                .call();
+
+        // 2. Ora esegui il checkout in modo forzato
+        git.checkout()
+                .setName(commit.getName())
+                .setForced(true) // Importante: forza il passaggio anche se JGit ha dubbi
+                .call();
     }
 
     // Chiude la connessione con il repository
@@ -176,5 +171,8 @@ public final class GitRepository {
 
         return javaFiles;
     }
+
 }
+
+
 
