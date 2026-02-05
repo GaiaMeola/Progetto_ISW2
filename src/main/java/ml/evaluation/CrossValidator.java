@@ -52,7 +52,7 @@ public class CrossValidator {
         for (int i = 0; i < repeats; i++) {
             // Mescoliamo i dati per ogni ripetizione
             Instances randomizedData = new Instances(data);
-            randomizedData.randomize(new Random(SEED + i));
+            randomizedData.randomize(new Random((long)SEED + i));
             if (randomizedData.classAttribute().isNominal()) {
                 randomizedData.stratify(folds);
             }
