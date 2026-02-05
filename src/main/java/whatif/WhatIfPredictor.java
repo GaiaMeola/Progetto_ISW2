@@ -5,6 +5,7 @@ import util.ProjectType;
 import weka.attributeSelection.InfoGainAttributeEval;
 import weka.attributeSelection.Ranker;
 import weka.classifiers.Classifier;
+import weka.classifiers.lazy.IBk;
 import weka.classifiers.trees.RandomForest;
 import weka.core.Attribute;
 import weka.core.Instance;
@@ -134,7 +135,7 @@ public class WhatIfPredictor {
     private static Instances applySMOTE(Instances data) throws Exception {
         SMOTE smote = new SMOTE();
         smote.setInputFormat(data);
-        smote.setPercentage(00.0);
+        smote.setPercentage(20.0);
         return Filter.useFilter(data, smote);
     }
 
@@ -150,15 +151,21 @@ public class WhatIfPredictor {
     }
 
 
-    // Costruisce il classificatore (RandomForest o IBk) in base al progetto.
+    // Costruisce il classificatore ottimale in base al progetto selezionato.
     private static Classifier buildClassifier(Instances trainData) throws Exception {
         if (Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER) {
-            weka.classifiers.bayes.NaiveBayes nb = new weka.classifiers.bayes.NaiveBayes();
-            nb.buildClassifier(trainData);
-            return nb;
+            // Miglior classificatore per BookKeeper: IBk (K-Nearest Neighbors)
+            IBk ibk = new IBk();
+            ibk.setKNN(3);
+            ibk.buildClassifier(trainData);
+            return ibk;
         } else {
-            RandomForest rf = new RandomForest();
-            String[] options = Utils.splitOptions("-I 30 -depth 12 -K 0 -S 1 -num-slots 1 -M 50");
+            // Miglior classificatore per OpenJPA: Random Forest
+            weka.classifiers.trees.RandomForest rf = new weka.classifiers.trees.RandomForest();
+
+            // Parametri ottimizzati: I=30, depth=12, M=50, K=0 (auto), S=1, slots=1
+            // Nota: BagSizePercent impostato al 50% come indicato nell'ultimo snippet
+            String[] options = Utils.splitOptions("-I 30 -depth 12 -M 50 -K 0 -S 1 -num-slots 1");
             rf.setOptions(options);
             rf.setBagSizePercent(50);
             rf.buildClassifier(trainData);

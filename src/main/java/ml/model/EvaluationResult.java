@@ -21,6 +21,14 @@ public class EvaluationResult {
         this.kappa = kappa;
     }
 
+    public double getAccuracy() {
+        return accuracy;
+    }
+
+    public double getF1() {
+        return f1;
+    }
+
     public String getClassifierName() {
         return classifierName;
     }

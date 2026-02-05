@@ -28,7 +28,7 @@ public class AFMethodFinder {
             // Seleziona AFeature dinamicamente
             String logicalAFeature = Configuration.SELECTED_PROJECT == util.ProjectType.BOOKKEEPER
                     ? "NumberOfSmells"
-                    : "NestingDepth";
+                    : "StatementCount";
 
             // Ricerca della feature nel dataset
             int aFeatureIndex = -1;

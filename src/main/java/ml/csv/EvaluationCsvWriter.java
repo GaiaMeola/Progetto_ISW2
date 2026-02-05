@@ -14,12 +14,15 @@ public class EvaluationCsvWriter {
     }
 
     public static void write(String projectName, EvaluationResult result) {
-        String outputFile = "ml_results/" + projectName.toLowerCase() + "_summary_results.csv";
+        // Nota: Ho cambiato la cartella in 'ml_results/' per coerenza con lo script Python
+        // che cercherà i file 'results_OPENJPA.csv'
+        String outputFile = "results_" + projectName.toLowerCase() + ".csv";
         boolean fileExists = new File(outputFile).exists();
 
         try (FileWriter writer = new FileWriter(outputFile, true)) {
             if (!fileExists) {
-                writer.write("Classifier,FeatureSelection,SMOTE,Precision,Recall,AUC,Kappa,NPofB20\n");
+                // AGGIORNATO: Aggiunte le colonne Model, Accuracy e F1
+                writer.write("Model,FeatureSelection,SMOTE,Accuracy,Precision,Recall,F1,AUC,Kappa,NPofB20\n");
             }
 
             String[] tokens = result.getClassifierName().split("_");
@@ -27,13 +30,15 @@ public class EvaluationCsvWriter {
             String fs = tokens[1].split("=")[1];
             String smote = tokens[2].split("=")[1];
 
-            // Forziamo Locale.US per usare il punto '.' invece della virgola ','
+            // AGGIORNATO: Inseriti result.getAccuracy() e result.getF1()
             writer.write(String.format(
                     Locale.US,
-                    "%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f%n",
+                    "%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f%n",
                     classifier, fs, smote,
+                    result.getAccuracy(),   // <--- CHIAMA IL NUOVO GETTER
                     result.getPrecision(),
                     result.getRecall(),
+                    result.getF1(),          // <--- CHIAMA IL NUOVO GETTER
                     result.getAuc(),
                     result.getKappa(),
                     result.getNpofb20()

@@ -45,7 +45,7 @@ public class CrossValidator {
             data = Filter.useFilter(data, remove);
         }
 
-        double sumPrecision = 0, sumRecall = 0, sumF1 = 0, sumAUC = 0, sumKappa = 0, sumNP = 0;
+        double sumAccuracy = 0,  sumPrecision = 0, sumRecall = 0, sumF1 = 0, sumAUC = 0, sumKappa = 0, sumNP = 0;
         int totalIterations = repeats * folds;
 
         // 10 times...
@@ -96,6 +96,7 @@ public class CrossValidator {
                 double npofb20Fold = computeNPofB20(clsCopy, train, test);
 
                 // Accumulo risultati medi
+                sumAccuracy += foldEval.pctCorrect() / 100.0;
                 sumPrecision += foldEval.weightedPrecision();
                 sumRecall += foldEval.weightedRecall();
                 sumF1 += foldEval.weightedFMeasure();
@@ -105,6 +106,8 @@ public class CrossValidator {
 
                 // Salvataggio dettaglio fold
                 EvaluationFoldResult foldRes = new EvaluationFoldResult(name, applyFeatureSelection, applySmote, SEED, i, n);
+                foldRes.setAccuracy(foldEval.pctCorrect() / 100.0);
+                foldRes.setF1(foldEval.weightedFMeasure());
                 foldRes.setPrecision(foldEval.weightedPrecision());
                 foldRes.setRecall(foldEval.weightedRecall());
                 foldRes.setAuc(foldEval.weightedAreaUnderROC());
@@ -118,7 +121,7 @@ public class CrossValidator {
         // Creazione dell'oggetto usando il tuo costruttore a 7 parametri
         EvaluationResult result = new EvaluationResult(
                 name,
-                0.0,                           // accuracy (non calcolata nel ciclo)
+                sumAccuracy / totalIterations,                           // accuracy (non calcolata nel ciclo)
                 sumPrecision / totalIterations,
                 sumRecall / totalIterations,
                 sumF1 / totalIterations,

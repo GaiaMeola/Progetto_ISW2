@@ -25,7 +25,7 @@ public class GenericSamplerEvaluation {
         try {
             // --- CONFIGURAZIONE MANUALE ---
             // Imposta a true per bilanciare (Kappa alto), false per distribuzione reale (Kappa 0.2-0.4)
-            boolean useUnderSampling = false;
+            boolean useUnderSampling = true;
             boolean applyFeatureSelection = false;
             // ------------------------------
 

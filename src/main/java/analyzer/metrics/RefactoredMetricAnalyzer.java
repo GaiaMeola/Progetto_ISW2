@@ -11,6 +11,7 @@ import net.sourceforge.pmd.lang.LanguageVersion;
 import net.sourceforge.pmd.reporting.Report;
 import org.slf4j.LoggerFactory;
 import util.Configuration;
+import util.ProjectType;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -22,10 +23,15 @@ import java.util.logging.Level;
 public class RefactoredMetricAnalyzer {
 
     // PUNTA AL FILE FUORI DA SRC (Così non blocca la compilazione)
-    private static final String FILE_NAME = "refactored_methods/TestClient.java";
+    private static final String FILE_NAME = Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER
+            ? "refactored_methods/BenchReadThroughputLatencyRefactoredMain.java"
+            : "refactored_methods/FieldMetaDataRefactoredCopy.java";
 
     // SALVA UN CSV DIVERSO
-    private static final String OUTPUT_NAME = "ml_results/bookkeeper_refactored_metrics.csv";
+    // Output salvato nella cartella dei risultati definita nella config
+    private static final String OUTPUT_NAME = Configuration.SELECTED_PROJECT == ProjectType.BOOKKEEPER
+            ? "ml_results/bookkeeper_AFMethod2_metrics_refactored.csv"
+            : "ml_results/openjpa_AFMethod2_metrics_refactored.csv";
 
     public static void main(String[] args) {
 

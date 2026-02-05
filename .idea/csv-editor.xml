@@ -10,10 +10,10 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/csv_output/openjpa_output 2.csv">
+        <entry key="/csv_output/fold_results.csv">
           <value>
             <Attribute>
-              <option name="separator" value=";" />
+              <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
@@ -38,6 +38,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/ml_results/bookkeeper_AFMethod2_metrics.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/ml_results/bookkeeper_feature_correlation.csv">
           <value>
             <Attribute>
@@ -45,14 +52,35 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/whatif/bookkeeper_B.csv">
+        <entry key="/ml_results/openjpa_AFMethod2_metrics.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/openjpa_AFMethod2_metrics_refactored.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/openjpa_cleaned_temp.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="/ml_results/openjpa_feature_correlation.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="/whatif/bookkeeper_Bplus.csv">
+        <entry key="/results_bookkeeper.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />

@@ -77,7 +77,6 @@ public class CrossValidatorWithPreprocessing {
 
         } catch (Exception e) {
             System.err.println("ERRORE CRITICO: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 }
