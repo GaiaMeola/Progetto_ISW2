@@ -45,8 +45,6 @@ public class MethodInfo {
     public int getLocalVariableCount() { return localVariableCount; }
     public void setLocalVariableCount(int localVariableCount) { this.localVariableCount = localVariableCount; }
 
-    public LocalDate getReleaseDate() { return releaseDate; }
-
     public void setReleaseDate(LocalDate releaseDate) { this.releaseDate = releaseDate; }
 
     public String getMethodCode() { return methodCode; }

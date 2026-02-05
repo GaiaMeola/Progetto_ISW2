@@ -229,8 +229,7 @@ public class TicketParser {
 
 
     public static void main(String[] args) throws Exception {
-        Map<String, TicketInfo> tickets = parseTicketsFromJira();
-        CsvTicketDebugWriter.writeTicketCsv(Configuration.getDebugTicketPath(), tickets);
+        CsvTicketDebugWriter.writeTicketCsv(Configuration.getDebugTicketPath());
     }
 }
 

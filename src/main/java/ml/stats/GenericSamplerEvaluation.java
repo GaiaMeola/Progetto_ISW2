@@ -42,7 +42,7 @@ public class GenericSamplerEvaluation {
             String[] classifiersToTest = {"ibk", "naivebayes", "randomforest"};
 
             for (String name : classifiersToTest) {
-                String strategyLog = useUnderSampling ? "CON Under-sampling" : "SENZA Under-sampling";
+                String strategyLog = "CON Under-sampling";
                 Configuration.logger.info("\n>>> AVVIO: " + name + " su OpenJPA " + strategyLog);
 
                 // Selezione del sample iniziale (20.000 istanze)
@@ -50,12 +50,8 @@ public class GenericSamplerEvaluation {
                 Instances currentData = new Instances(data, 0, sampleSize);
 
                 // LOGICA DI BILANCIAMENTO CONDIZIONALE
-                if (useUnderSampling) {
-                    currentData = balanceDataset(currentData);
-                    Configuration.logger.info("Bilanciamento applicato. Istanze finali: " + currentData.numInstances());
-                } else {
-                    Configuration.logger.info("Esecuzione su dati originali. Istanze finali: " + currentData.numInstances());
-                }
+                currentData = balanceDataset(currentData);
+                Configuration.logger.info("Bilanciamento applicato. Istanze finali: " + currentData.numInstances());
 
                 Classifier classifier = createClassifier(name);
 

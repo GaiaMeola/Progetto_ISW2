@@ -35,13 +35,13 @@ public class WhatIfDatasetBuilder {
     }
 
     // Costruisce il dataset C (metodi clean, senza smells) - CAMBIATO IN Instances
-    public Instances buildC(Instances datasetA) {
+    public void buildC(Instances datasetA) {
         Configuration.logger.info("Costruzione dataset C: " + RAW_FEATURE_NAME + " == 0");
-        return filterAndLog(datasetA, v -> v == 0, PROJECT_PREFIX + "_C.csv");
+        filterAndLog(datasetA, v -> v == 0, PROJECT_PREFIX + "_C.csv");
     }
 
     // Costruisce il dataset B (what-if): copia di B⁺ con NumberOfSmells forzato a 0 - CAMBIATO IN Instances
-    public Instances buildB(Instances datasetBPlus) {
+    public void buildB(Instances datasetBPlus) {
         Configuration.logger.info("Costruzione dataset B (what-if): B⁺ con " + RAW_FEATURE_NAME + " = 0");
 
         Instances cloned = new Instances(datasetBPlus);
@@ -52,7 +52,6 @@ public class WhatIfDatasetBuilder {
         }
 
         exportToCsv(cloned, PROJECT_PREFIX + "_B.csv");
-        return cloned; // Ritorna l'istanza modificata
     }
 
     // Filtra le istanze in base a una predicate sulla feature e le esporta

@@ -5,6 +5,7 @@ import analyzer.model.MethodInfo;
 import analyzer.csv.CsvHandler;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -22,6 +23,7 @@ import net.sourceforge.pmd.lang.LanguageVersion;
 import net.sourceforge.pmd.reporting.Report;
 import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
+import java.util.stream.Stream;
 
 public class MethodMetricsExtractor {
 
@@ -61,32 +63,33 @@ public class MethodMetricsExtractor {
 
         int fileCount = 0;
 
-        try {
-            List<Path> javaFiles = Files.walk(Paths.get(projectPath))
+        List<Path> javaFiles;
+        try (Stream<Path> paths = Files.walk(Paths.get(projectPath))) {
+            javaFiles = paths
                     .filter(Files::isRegularFile)
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> !path.toString().contains("/target/"))
-                    .filter(path -> !path.toString().contains("/test/"))
-                    .filter(path -> !path.toString().contains("/generated/"))
-                    .filter(path -> !path.toString().contains("/build/"))
-                    .toList();
-
-            for (Path path : javaFiles) {
-                analyzeFile(path);
-                fileCount++;
-            }
-
-            if(Configuration.BASIC_DEBUG && Configuration.logger.isLoggable(Level.INFO)){
-                Configuration.logger.info(String.format("File .java analizzati: %d", fileCount));
-                Configuration.logger.info(String.format("Chiamo analisi storica su %d metodi.", methodInfos.size()));
-            }
-
-            historicalExtractor.analyzeHistoryForMethods(methodInfos, currentRelease);
-
-
+                    .filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> !p.toString().contains("/target/"))
+                    .filter(p -> !p.toString().contains("/test/"))
+                    .filter(p -> !p.toString().contains("/generated/"))
+                    .filter(p -> !p.toString().contains("/build/"))
+                    .toList(); // Risolve il suggerimento di SonarCloud dello Screenshot 8
         } catch (IOException e) {
-            Configuration.logger.info("Aanalisi progrtto fallita");
+            throw new UncheckedIOException(e);
         }
+
+        for (Path path : javaFiles) {
+            analyzeFile(path);
+            fileCount++;
+        }
+
+        if(Configuration.BASIC_DEBUG && Configuration.logger.isLoggable(Level.INFO)){
+            Configuration.logger.info(String.format("File .java analizzati: %d", fileCount));
+            Configuration.logger.info(String.format("Chiamo analisi storica su %d metodi.", methodInfos.size()));
+        }
+
+        historicalExtractor.analyzeHistoryForMethods(methodInfos, currentRelease);
+
+
     }
 
     // Cerca metodi nel file
@@ -183,7 +186,7 @@ public class MethodMetricsExtractor {
             info.setReturnTypeComplexity(staticCalc.calculateReturnTypeComplexity(method)); // Return Type Complexity
             info.setLocalVariableCount(staticCalc.calculateLocalVariableCount(method)); // Local Variable Count
 
-            // Target, per ora impstiamo sempre false
+            // Target, per ora impostiamo sempre false
             info.setBugginess(false);
 
             return info;

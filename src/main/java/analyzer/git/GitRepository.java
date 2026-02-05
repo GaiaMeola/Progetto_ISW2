@@ -15,7 +15,6 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.filter.CommitTimeRevFilter;
 import org.eclipse.jgit.revwalk.filter.MessageRevFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
-import util.Configuration;
 
 import java.io.File;
 import java.io.IOException;

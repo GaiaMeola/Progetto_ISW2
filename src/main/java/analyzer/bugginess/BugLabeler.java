@@ -82,15 +82,6 @@ public class BugLabeler {
     }
 
     // Raggruppa i metodi per file e release
-//    private static Map<String, List<MethodInfo>> groupMethodsByFileAndRelease(List<MethodInfo> methods) {
-//        Map<String, List<MethodInfo>> map = new HashMap<>();
-//        for (MethodInfo m : methods) {
-//            String filePath = extractFileFromMethodName(m.getMethodName());
-//            String key = filePath + "@" + m.getReleaseId(); // key: filePath@releaseId
-//            map.computeIfAbsent(key, k -> new ArrayList<>()).add(m); // value: lista dei metodi in quel file per quella release
-//        }
-//        return map;
-//    }
 
     private static Map<String, List<MethodInfo>> groupMethodsByFileAndRelease(List<MethodInfo> methods) {
         Map<String, List<MethodInfo>> map = new HashMap<>();
@@ -232,41 +223,6 @@ public class BugLabeler {
     - Se sì, individua i metodi toccati in quel file
     - Etichetta quei metodi come buggy
      */
-//    private static int[] processTicketCommits(
-//            TicketInfo ticket,
-//            GitRepository repo,
-//            Set<String> buggyReleases,
-//            Map<String, List<MethodInfo>> methodsByFileAndRelease,
-//            MethodTouchAnalyzer analyzer,
-//            List<String[]> debugRows
-//    ) {
-//        int[] counters = new int[]{0, 0}; // counters[0] = buggyFromAV, counters[1] = buggyFromProportion
-//
-//        // Scorre tutti i commit legati al ticket
-//        for (String commitHash : ticket.getCommitIds()) {
-//            RevCommit commit = resolveCommit(commitHash, repo); // Lo risolve (resolveCommit) da hash a RevCommit
-//            if (commit == null) continue; // Se fallisce, lo salta
-//
-//            Set<String> files = new HashSet<>(ticket.getFixedFiles());
-//
-//            //  Per ogni file toccato dal commit
-//            for (String filePath : files) {
-//                for (String releaseId : buggyReleases) { // E per ogni release considerata "buggy"
-//                    String key = filePath + "@" + releaseId; // Costruisce la chiave file@release per accedere alla lista di metodi corrispondenti
-//                    if (!methodsByFileAndRelease.containsKey(key)) continue;
-//
-//                    // Trova i metodi modificati
-//                    List<MethodInfo> candidates = methodsByFileAndRelease.get(key);
-//                    Set<MethodInfo> touched = analyzer.getTouchedMethods(commit, filePath, candidates);
-//
-//                    // Etichetta i metodi toccati
-//                    processTouchedMethods(touched, ticket, commit, debugRows, counters);
-//                }
-//            }
-//        }
-//
-//        return counters;
-//    }
 
     private static int[] processTicketCommits(
             TicketInfo ticket,

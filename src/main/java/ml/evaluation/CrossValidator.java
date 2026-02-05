@@ -93,7 +93,7 @@ public class CrossValidator {
                 Evaluation foldEval = new Evaluation(train);
                 foldEval.evaluateModel(clsCopy, test);
 
-                double npofb20Fold = computeNPofB20(clsCopy, train, test);
+                double npofb20Fold = computeNPofB20(clsCopy, test);
 
                 // Accumulo risultati medi
                 sumAccuracy += foldEval.pctCorrect() / 100.0;
@@ -135,7 +135,7 @@ public class CrossValidator {
         return result;
     }
 
-    public static double computeNPofB20(Classifier trainedCls, Instances train, Instances test) throws Exception {
+    public static double computeNPofB20(Classifier trainedCls, Instances test) throws Exception {
         int yesIndex = test.classAttribute().indexOfValue("Yes");
         List<double[]> scored = new ArrayList<>();
 

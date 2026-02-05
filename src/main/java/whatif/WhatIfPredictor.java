@@ -6,7 +6,6 @@ import weka.attributeSelection.InfoGainAttributeEval;
 import weka.attributeSelection.Ranker;
 import weka.classifiers.Classifier;
 import weka.classifiers.lazy.IBk;
-import weka.classifiers.trees.RandomForest;
 import weka.core.Attribute;
 import weka.core.Instance;
 import weka.core.Instances;

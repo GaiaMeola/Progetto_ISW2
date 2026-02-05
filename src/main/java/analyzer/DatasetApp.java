@@ -91,7 +91,6 @@ public class DatasetApp {
                 c.setAuthor(commit.getAuthorIdent().getName());
                 c.setDate(commit.getAuthorIdent().getWhen().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
                 c.setMessage(commit.getShortMessage());
-                c.setFilesTouched(null);
                 selectedCommits.add(c);
 
                 // Fai il checkout al commit
@@ -139,7 +138,6 @@ public class DatasetApp {
 
         } catch (Exception e) {
             Configuration.logger.info("Errore durante l'esecuzione.");
-            e.printStackTrace(); // <--- Aggiungi questo
         }
     }
 }

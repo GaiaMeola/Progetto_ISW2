@@ -13,7 +13,7 @@ public class SpearmanWithPValue {
         // Prevent instantiation
     }
 
-    public static class Result {
+    public static class Result { //NOSONAR
         public final double rho;     // Aggiungi public qui
         public final double pValue;  // Aggiungi public qui
 

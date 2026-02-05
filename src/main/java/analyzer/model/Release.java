@@ -26,7 +26,6 @@ public class Release {
     public LocalDate getReleaseDate() { return releaseDate; }
     public void setReleaseDate(LocalDate releaseDate) { this.releaseDate = releaseDate; }
 
-    public boolean isReleased() { return released; }
     public void setReleased(boolean released) { this.released = released; }
 
     @Override

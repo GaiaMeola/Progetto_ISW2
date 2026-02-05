@@ -100,7 +100,6 @@ public class RefactorPredictor {
 
         } catch (Exception e) {
             System.err.println("ERRORE: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 

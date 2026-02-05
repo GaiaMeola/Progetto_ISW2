@@ -5,16 +5,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class TicketInfo {
-    private String id;
+    private final String id;
     private LocalDate openingVersion; // OV
     private LocalDate fixVersion;     // FV
     private LocalDate injectedVersion; // IV
-    private List<String> affectedVersions = new ArrayList<>();
-    private List<String> fixedFiles = new ArrayList<>();
-    private List<String> affectedMethods = new ArrayList<>();
+    private final List<String> affectedVersions = new ArrayList<>();
+    private final List<String> fixedFiles = new ArrayList<>();
+    private final List<String> affectedMethods = new ArrayList<>();
     private String fixVersionName;
-    private List<String> fixVersionNames = new ArrayList<>();
-    private List<LocalDate> fixVersionDates = new ArrayList<>();
+    private final List<String> fixVersionNames = new ArrayList<>();
+    private final List<LocalDate> fixVersionDates = new ArrayList<>();
     private final List<String> commitIds = new ArrayList<>();
 
     public TicketInfo(String id) {
@@ -23,7 +23,6 @@ public class TicketInfo {
 
     public String getId() { return id; }
 
-    public List<String> getFixVersionNames() { return fixVersionNames; }
     public List<LocalDate> getFixVersionDates() { return fixVersionDates; }
 
     public List<String> getCommitIds() { return commitIds; }
