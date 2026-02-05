@@ -20,6 +20,7 @@ public class BugLabeler {
      */
 
     private static final String TICKET_PREFIX = "Ticket ";
+    public static final String DEBUG_TOUCH_MSG = "[DEBUG-TOUCH] File trovato, ma nessun metodo toccato nel commit per: ";
 
     private BugLabeler() {
         // Utility class → no instance
@@ -91,7 +92,7 @@ public class BugLabeler {
 
             // DEBUG: Vediamo i primi 5 file caricati per capire il formato
             if (map.size() < 5 && Configuration.LABELING_DEBUG) {
-                Configuration.logger.info("[DEBUG-PATH] Esempio chiave in mappa: " + key);
+                Configuration.logger.info(DEBUG_TOUCH_MSG + key);
             }
 
             map.computeIfAbsent(key, k -> new ArrayList<>()).add(m);
@@ -256,7 +257,7 @@ public class BugLabeler {
                     Set<MethodInfo> touched = analyzer.getTouchedMethods(commit, filePath, candidates);
 
                     if (touched.isEmpty() && Configuration.LABELING_DEBUG) {
-                        Configuration.logger.info("[DEBUG-TOUCH] File trovato, ma nessun metodo toccato nel commit per: " + key);
+                        Configuration.logger.info(DEBUG_TOUCH_MSG + key);
                     }
 
                     processTouchedMethods(touched, ticket, commit, debugRows, counters);

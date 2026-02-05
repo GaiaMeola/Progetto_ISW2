@@ -43,6 +43,7 @@ public class Configuration {
 
 
     public static final ProjectType SELECTED_PROJECT = ProjectType.BOOKKEEPER;
+    public static final boolean ANALYZE_REFACTORED = true; // Cambia a true per analizzare i file post-refactoring
 
     public static String getProjectName() {
         return (SELECTED_PROJECT == ProjectType.BOOKKEEPER) ? PROJECT1_NAME : PROJECT2_NAME;
