@@ -45,6 +45,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/ml_results/bookkeeper_AFMethod2_metrics_refactored 2.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value=";" />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/ml_results/bookkeeper_AFMethod2_metrics_refactored.csv">
           <value>
             <Attribute>
@@ -73,14 +80,14 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="/ml_results/openjpa_AFMethod2_metrics_refactored 3.csv">
+        <entry key="/ml_results/openjpa_AFMethod2_metrics_refactored 2.csv">
           <value>
             <Attribute>
               <option name="separator" value=";" />
             </Attribute>
           </value>
         </entry>
-        <entry key="/ml_results/openjpa_AFMethod2_metrics_refactored.csv">
+        <entry key="/ml_results/openjpa_cleaned_temp 2.csv">
           <value>
             <Attribute>
               <option name="separator" value=";" />
