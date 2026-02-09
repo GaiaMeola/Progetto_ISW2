@@ -1,5 +1,2 @@
-Software Metrics & Refactoring Impact Analysis
-Abstract: Il legame tra la struttura del codice e l’insorgenza di bug rappresenta una sfida critica per la sostenibilità del software. Questo lavoro indaga tale correlazione attraverso l’analisi dei repository Apache BookKeeper e Apache OpenJPA, integrando metriche statico-dinamiche e algoritmi di machine learning per modellare la defect proneness a livello di metodo.
-
-Obiettivi della Ricerca
-A differenza degli approcci tradizionali, questa ricerca si focalizza sull’efficacia del refactoring come strumento preventivo. Mediante una simulazione what-if, è stato quantificato come la neutralizzazione sistematica dei code smell possa alterare il profilo di rischio del software.
+Esame ISW2 Magistrale: Software Metrics & Refactoring Impact Analysis
+Abstract: Il legame tra la struttura del codice e l’insorgenza di bug rappresenta una sfida critica per la sostenibilità del software. Questo lavoro indaga tale correlazione attraverso l’analisi dei repository Apache BookKeeper e Apache OpenJPA, integrando metriche statico-dinamiche e algoritmi di machine learning per modellare la defect proneness a livello di metodo. A differenza degli approcci tradizionali, questa ricerca si focalizza sull’efficacia del refactoring come strumento preventivo. Mediante una simulazione what-if, è stato quantificato come la neutralizzazione sistematica dei code smell possa alterare il profilo di rischio del software.
